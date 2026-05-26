@@ -1,0 +1,52 @@
+# Segredos — NUNCA versionar
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-*
+
+# Dados sensíveis
+data/
+
+# Screenshots de teste
+screenshots/
+
+# Logs
+*.log
+server_test.log
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Sistema
+.DS_Store
+desktop.ini
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+
+# Cookies de sessão
+cookies.txt
+
+# Claude Code
+.claude/

@@ -1,0 +1,18 @@
+# Nunca enviar secrets para a imagem
+.env
+.env.*
+!.env.example
+
+# Lixo de desenvolvimento
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.vscode/
+.idea/
+
+# Screenshots de teste — desnecessárias na produção
+screenshots/
+
+# Git
+.git/

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: pip install -r requirements-dev.txt
+
+      - name: Criar .env de teste
+        run: |
+          echo "SECRET_KEY=ci-test-key-$(date +%s)" >> .env
+          echo "ADMIN_USER=marcone"                  >> .env
+          echo "ADMIN_PASS=3209"                     >> .env
+          echo "FLASK_ENV=development"               >> .env
+
+      - name: Criar diretório data com JSON vazio para CI
+        run: |
+          mkdir -p data
+          echo "[]" > data/dashboard_financeiro.json
+
+      - name: Rodar testes
+        run: pytest tests/ -v --tb=short

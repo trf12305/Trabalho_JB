@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>
+        JB Proteção Veicular — Dashboard Central
+    </title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+
+        :root{
+            --bg:#07090f;
+            --bg2:#0d1018;
+            --bg3:#121620;
+            --card:#141820;
+            --border:rgba(255,255,255,.07);
+            --orange:#ff6b00;
+            --orangeL:rgba(255,107,0,.12);
+            --green:#00c896;
+            --red:#ff3355;
+            --text:#f0f2f8;
+            --muted:#5a6070;
+            --muted2:#8090a8;
+            --sans:'Barlow',sans-serif;
+            --cond:'Barlow Condensed',sans-serif;
+        }
+
+        *{
+            margin:0;
+            padding:0;
+            box-sizing:border-box;
+        }
+
+        body{
+            background:var(--bg);
+            color:var(--text);
+            font-family:var(--sans);
+            overflow:hidden;
+        }
+
+        body::before{
+            content:'';
+            position:fixed;
+            inset:0;
+
+            background-image:
+                linear-gradient(rgba(255,107,0,.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,107,0,.03) 1px, transparent 1px);
+
+            background-size:48px 48px;
+
+            pointer-events:none;
+        }
+
+        .glow{
+            position:fixed;
+            top:-200px;
+            left:50%;
+            transform:translateX(-50%);
+            width:700px;
+            height:400px;
+
+            background:
+                radial-gradient(
+                    ellipse,
+                    rgba(255,107,0,.10) 0%,
+                    transparent 70%
+                );
+
+            pointer-events:none;
+        }
+
+        .shell{
+            position:relative;
+            z-index:1;
+            display:flex;
+            height:100vh;
+        }
+
+        /* SIDEBAR */
+
+        aside{
+            width:250px;
+            background:var(--bg2);
+            border-right:1px solid var(--border);
+
+            display:flex;
+            flex-direction:column;
+        }
+
+        .s-logo{
+            padding:1.5rem;
+            border-bottom:1px solid var(--border);
+        }
+
+        .logo-row{
+            display:flex;
+            align-items:center;
+            gap:10px;
+        }
+
+        .logo-ic{
+            width:38px;
+            height:38px;
+            background:var(--orange);
+            border-radius:10px;
+
+            display:flex;
+            align-items:center;
+            justify-content:center;
+
+            color:#000;
+            font-weight:800;
+            font-family:var(--cond);
+        }
+
+        .logo-nm{
+            font-family:var(--cond);
+            font-weight:800;
+            text-transform:uppercase;
+            line-height:1;
+        }
+
+        .logo-nm span{
+            display:block;
+            font-size:.65rem;
+            color:var(--orange);
+            letter-spacing:2px;
+            margin-top:3px;
+        }
+
+        nav{
+            flex:1;
+            padding:1rem .7rem;
+        }
+
+        .s-sec{
+            padding:.7rem;
+            color:var(--muted);
+            font-size:.65rem;
+            text-transform:uppercase;
+            letter-spacing:2px;
+            font-family:var(--cond);
+        }
+
+        .ni{
+            display:flex;
+            align-items:center;
+            gap:10px;
+
+            padding:.75rem .9rem;
+
+            border-radius:10px;
+
+            cursor:pointer;
+
+            color:var(--muted2);
+
+            transition:.2s;
+
+            margin-bottom:4px;
+
+            font-size:.85rem;
+        }
+
+        .ni:hover{
+            background:rgba(255,255,255,.04);
+            color:var(--text);
+        }
+
+        .ni.active{
+            background:var(--orangeL);
+            color:var(--orange);
+        }
+
+        .s-foot{
+            border-top:1px solid var(--border);
+            padding:1rem;
+        }
+
+        .u-row{
+            display:flex;
+            align-items:center;
+            gap:10px;
+        }
+
+        .u-av{
+            width:34px;
+            height:34px;
+            border-radius:50%;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    var(--orange),
+                    #c74a00
+                );
+
+            display:flex;
+            align-items:center;
+            justify-content:center;
+
+            font-weight:700;
+            font-family:var(--cond);
+        }
+
+        .u-nm{
+            font-size:.8rem;
+            font-weight:600;
+        }
+
+        .u-role{
+            font-size:.65rem;
+            color:var(--muted);
+            text-transform:uppercase;
+            font-family:var(--cond);
+        }
+
+        /* MAIN */
+
+        main{
+            flex:1;
+            display:flex;
+            flex-direction:column;
+            overflow:hidden;
+        }
+
+        .topbar{
+            height:72px;
+            background:var(--bg2);
+            border-bottom:1px solid var(--border);
+
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+
+            padding:0 2rem;
+        }
+
+        .topbar h1{
+            font-family:var(--cond);
+            font-size:1.4rem;
+            text-transform:uppercase;
+            letter-spacing:1px;
+        }
+
+        .topbar p{
+            color:var(--muted2);
+            font-size:.75rem;
+            margin-top:2px;
+        }
+
+        .tr{
+            display:flex;
+            gap:.7rem;
+            align-items:center;
+        }
+
+        .chip{
+            display:flex;
+            align-items:center;
+            gap:6px;
+
+            background:var(--bg3);
+            border:1px solid var(--border);
+
+            padding:.45rem .8rem;
+
+            border-radius:8px;
+
+            font-size:.75rem;
+            color:var(--muted2);
+
+            font-family:var(--cond);
+        }
+
+        .chip.o{
+            border-color:var(--orange);
+            color:var(--orange);
+            background:var(--orangeL);
+        }
+
+        .live-dot{
+            width:8px;
+            height:8px;
+            border-radius:50%;
+            background:var(--green);
+
+            animation:pulse 2s infinite;
+        }
+
+        @keyframes pulse{
+
+            0%,100%{
+                box-shadow:0 0 0 0 rgba(0,200,150,.4);
+            }
+
+            50%{
+                box-shadow:0 0 0 6px rgba(0,200,150,0);
+            }
+
+        }
+
+        /* IFRAME */
+
+        .frame-wrap{
+            flex:1;
+            padding:1.5rem;
+            overflow:hidden;
+        }
+
+        iframe{
+            width:100%;
+            height:100%;
+            border:none;
+            border-radius:16px;
+            background:var(--bg2);
+        }
+
+        ::-webkit-scrollbar{
+            width:5px;
+            height:5px;
+        }
+
+        ::-webkit-scrollbar-thumb{
+            background:rgba(255,255,255,.08);
+            border-radius:99px;
+        }
+
+        @media(max-width:900px){
+
+            aside{
+                width:80px;
+            }
+
+            .logo-nm,
+            .s-sec,
+            .u-info,
+            .ni span{
+                display:none;
+            }
+
+            .ni{
+                justify-content:center;
+            }
+
+            .topbar{
+                padding:0 1rem;
+            }
+
+            .topbar h1{
+                font-size:1rem;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+    <div class="glow"></div>
+
+    <div class="shell">
+
+        <!-- SIDEBAR -->
+
+        <aside>
+
+            <div class="s-logo">
+
+                <div class="logo-row">
+
+                    <div class="logo-ic">
+                        JB
+                    </div>
+
+                    <div class="logo-nm">
+
+                        JB Proteção
+
+                        <span>
+                            Veicular
+                        </span>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <nav>
+
+                <div class="s-sec">
+                    Principal
+                </div>
+
+                <div
+                    class="ni active"
+                    onclick="trocarPagina('/geral', this, 'Painel Geral')"
+                >
+
+                    <span>📊</span>
+                    <span>Painel Geral</span>
+
+                </div>
+
+                <div
+                    class="ni"
+                    onclick="trocarPagina('/eventos', this, 'Eventos')"
+                >
+
+                    <span>📅</span>
+                    <span>Eventos</span>
+
+                </div>
+
+                <div
+                    class="ni"
+                    onclick="trocarPagina('/financeiro', this, 'Financeiro')"
+                >
+
+                    <span>💰</span>
+                    <span>Financeiro</span>
+
+                </div>
+
+                <div
+                    class="ni"
+                    onclick="trocarPagina('/vendas', this, 'Vendas')"
+                >
+
+                    <span>📈</span>
+                    <span>Vendas</span>
+
+                </div>
+
+                <div
+                    class="ni"
+                    onclick="logout()"
+                >
+
+                    <span>🚪</span>
+                    <span>Sair</span>
+
+                </div>
+
+            </nav>
+
+            <div class="s-foot">
+
+                <div class="u-row">
+
+                    <div class="u-av">
+                        JB
+                    </div>
+
+                    <div class="u-info">
+
+                        <div class="u-nm">
+                            JB Proteção
+                        </div>
+
+                        <div class="u-role">
+                            Painel Executivo
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </aside>
+
+        <!-- MAIN -->
+
+        <main>
+
+            <div class="topbar">
+
+                <div>
+
+                    <h1 id="titulo">
+                        Painel Geral
+                    </h1>
+
+                    <p id="data-atual">
+                        —
+                    </p>
+
+                </div>
+
+                <div class="tr">
+
+                    <div class="chip">
+
+                        <div class="live-dot"></div>
+
+                        Sistema Online
+
+                    </div>
+
+                    <div class="chip o">
+                        Dashboard Central
+                    </div>
+
+                </div>
+
+            </div>
+
+            <div class="frame-wrap">
+
+                <iframe
+                    id="main-frame"
+                    src="/geral"
+                ></iframe>
+
+            </div>
+
+        </main>
+
+    </div>
+
+    <script>
+
+        document.getElementById('data-atual').innerText =
+            new Date().toLocaleDateString(
+                'pt-BR',
+                {
+                    weekday:'long',
+                    day:'numeric',
+                    month:'long',
+                    year:'numeric'
+                }
+            );
+
+        function trocarPagina(url, element, titulo){
+
+            document.getElementById('main-frame').src = url;
+
+            document.getElementById('titulo').innerText = titulo;
+
+            document.querySelectorAll('.ni')
+                .forEach(item => {
+                    item.classList.remove('active');
+                });
+
+            if(element){
+                element.classList.add('active');
+            }
+        }
+
+        function logout(){
+
+            window.location.href = '/logout';
+
+        }
+
+    </script>
+
+</body>
+
+</html>

@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>
+        JB Proteção Veicular — Dashboard Executivo
+    </title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        :root {
+            --primary: #f97316;
+            --primary-dark: #ea580c;
+            --bg: #050816;
+            --card: rgba(15, 23, 42, 0.7);
+            --border: rgba(255, 255, 255, 0.08);
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --green: #00c896;
+            --blue: #3b82f6;
+            --purple: #8b5cf6;
+            --red: #ef4444;
+        }
+
+        body {
+            background:
+                radial-gradient(circle at top left, rgba(249, 115, 22, 0.12), transparent 30%),
+                radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.12), transparent 30%),
+                linear-gradient(to bottom, #020617, #0f172a);
+            min-height: 100vh;
+            color: var(--text);
+            overflow-x: hidden;
+            padding: 2rem;
+        }
+
+        .glass {
+            background: var(--card);
+            border: 1px solid var(--border);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-radius: 24px;
+            box-shadow:
+                0 10px 40px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+
+        .glow {
+            box-shadow:
+                0 0 0 1px rgba(249, 115, 22, 0.1),
+                0 0 35px rgba(249, 115, 22, 0.15);
+        }
+
+        .topo {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .titulo h1 {
+            font-size: 3rem;
+            font-weight: 900;
+            letter-spacing: -2px;
+        }
+
+        .title-gradient {
+            background: linear-gradient(to right, #ffffff, #f97316);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .titulo p {
+            color: var(--muted);
+            margin-top: .5rem;
+        }
+
+        .online {
+            background: rgba(249, 115, 22, 0.1);
+            border: 1px solid rgba(249, 115, 22, 0.15);
+            border-radius: 18px;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 12px var(--green);
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .card,
+        .grafico-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-radius: 24px;
+            box-shadow:
+                0 10px 40px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+
+        .card {
+            padding: 1.5rem;
+            transition: 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(249, 115, 22, 0.4);
+        }
+
+        .card h3 {
+            color: var(--muted);
+            font-size: .85rem;
+            margin-bottom: .7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .card h2 {
+            font-size: 2rem;
+            font-weight: 900;
+            letter-spacing: -1px;
+            color: var(--primary);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .bottom-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .grafico-card {
+            padding: 1.5rem;
+        }
+
+        .grafico-card h2 {
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: white;
+        }
+
+        .chart-wrap {
+            position: relative;
+            height: 340px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            color: var(--muted);
+            padding-bottom: 1rem;
+            font-size: .8rem;
+            text-transform: uppercase;
+        }
+
+        td {
+            padding: 1rem 0;
+            border-top: 1px solid rgba(255,255,255,.05);
+        }
+
+        .table-row {
+            transition: 0.2s;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .table-row:hover {
+            background: rgba(249, 115, 22, 0.05);
+        }
+
+        .status {
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            display: inline-block;
+        }
+
+        .pendente {
+            background: rgba(249,115,22,.15);
+            color: #ffb06b;
+        }
+
+        .liquidado {
+            background: rgba(0,200,150,.15);
+            color: #5df0c5;
+        }
+
+        .cancelado {
+            background: rgba(239,68,68,.15);
+            color: #ff9c9c;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 999px;
+        }
+
+        .floating {
+            animation: floating 4s ease-in-out infinite;
+        }
+
+        @keyframes floating {
+            0% {
+                transform: translateY(0px);
+            }
+            50% {
+                transform: translateY(-6px);
+            }
+            100% {
+                transform: translateY(0px);
+            }
+        }
+
+        @media(max-width:1100px){
+
+            .grid,
+            .bottom-grid{
+                grid-template-columns:1fr;
+            }
+
+        }
+
+        @media(max-width:700px){
+
+            body{
+                padding:1rem;
+            }
+
+            .titulo h1{
+                font-size:2rem;
+            }
+
+            .card h2{
+                font-size:1.6rem;
+            }
+
+        }
+
+    </style>
+
+</head>
+<body>
+
+    <div class="topo">
+
+        <div class="titulo">
+
+            <h1>
+                Dashboard JB Proteção
+            </h1>
+
+            <p id="dataAtual"></p>
+
+        </div>
+
+        <div class="online">
+            <div class="dot"></div>
+            Sistema Online
+        </div>
+
+    </div>
+
+    <div class="cards">
+
+        <div class="card">
+            <h3>Total de Vendas</h3>
+            <h2 id="totalVendas">0</h2>
+        </div>
+
+        <div class="card">
+            <h3>Valor Liquidado</h3>
+            <h2 id="valorLiquidado">R$ 0</h2>
+        </div>
+
+        <div class="card">
+            <h3>Carteira</h3>
+            <h2 id="valorCarteira">R$ 0</h2>
+        </div>
+
+        <div class="card">
+            <h3>Ticket Médio</h3>
+            <h2 id="ticketMedio">R$ 0</h2>
+        </div>
+
+        <div class="card">
+            <h3>Base Ativa</h3>
+            <h2 id="baseAtiva">0</h2>
+        </div>
+
+        <div class="card">
+            <h3>Vendas Maio</h3>
+            <h2 id="mayVendas">0</h2>
+        </div>
+
+    </div>
+
+    <div class="grid">
+
+        <div class="grafico-card">
+            <h2>Vendas Mensais</h2>
+            <div class="chart-wrap">
+                <canvas id="graficoMensal"></canvas>
+            </div>
+        </div>
+
+        <div class="grafico-card">
+            <h2>Categorias</h2>
+            <div class="chart-wrap">
+                <canvas id="graficoCategorias"></canvas>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="bottom-grid">
+
+        <div class="grafico-card">
+            <h2>Top Consultores</h2>
+            <div class="chart-wrap">
+                <canvas id="graficoConsultores"></canvas>
+            </div>
+        </div>
+
+        <div class="grafico-card">
+            <h2>Situação dos Contratos</h2>
+            <div class="chart-wrap">
+                <canvas id="graficoSituacao"></canvas>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="grafico-card" style="margin-top:1rem;">
+
+        <h2>Últimas Vendas</h2>
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Consultor</th>
+                    <th>Loja</th>
+                    <th>Data</th>
+                    <th>Status</th>
+                    <th>Valor</th>
+                </tr>
+            </thead>
+
+            <tbody id="tabelaVendas"></tbody>
+
+        </table>
+
+    </div>
+
+    <script>
+
+        const dados = DATA.ALL;
+
+        document.getElementById('dataAtual').innerText =
+            new Date().toLocaleDateString('pt-BR', {
+                weekday:'long',
+                day:'numeric',
+                month:'long',
+                year:'numeric'
+            });
+
+        function moeda(valor){
+            return valor.toLocaleString('pt-BR', {
+                style:'currency',
+                currency:'BRL'
+            });
+
+        }
+
+        document.getElementById('totalVendas').innerText =
+            dados.kpis.total_vendas.toLocaleString('pt-BR');
+
+        document.getElementById('valorLiquidado').innerText =
+            moeda(dados.kpis.valor_liquidado);
+
+        document.getElementById('valorCarteira').innerText =
+            moeda(dados.kpis.valor_carteira);
+
+        document.getElementById('ticketMedio').innerText =
+            moeda(dados.kpis.ticket_medio);
+
+        document.getElementById('baseAtiva').innerText =
+            dados.kpis.base_ativa.toLocaleString('pt-BR');
+
+        document.getElementById('mayVendas').innerText =
+            dados.kpis.may_vendas;
+
+        new Chart(document.getElementById('graficoMensal'), {
+
+            type:'line',
+
+            data:{
+                labels:Object.keys(dados.monthly),
+                datasets:[{
+                    label:'Vendas',
+                    data:Object.values(dados.monthly),
+                    borderColor:'#ff6b00',
+                    backgroundColor:'rgba(255,107,0,.2)',
+                    fill:true,
+                    tension:.4
+                }]
+            },
+
+            options:{
+                responsive:true,
+                maintainAspectRatio:false,
+                plugins:{
+                    legend:{
+                        labels:{color:'#fff'}
+                    }
+                },
+                scales:{
+                    x:{ticks:{color:'#8090a8'}},
+                    y:{ticks:{color:'#8090a8'}}
+                }
+            }
+
+        });
+
+        new Chart(document.getElementById('graficoCategorias'), {
+
+            type:'doughnut',
+
+            data:{
+                labels:Object.keys(dados.categorias),
+                datasets:[{
+                    data:Object.values(dados.categorias),
+                    backgroundColor:[
+                        '#ff6b00',
+                        '#3b82f6',
+                        '#00c896',
+                        '#8b5cf6'
+                    ]
+                }]
+            },
+
+            options:{
+                responsive:true,
+                maintainAspectRatio:false,
+                plugins:{
+                    legend:{
+                        labels:{color:'#fff'}
+                    }
+                }
+            }
+
+        });
+
+        new Chart(document.getElementById('graficoConsultores'), {
+
+            type:'bar',
+
+            data:{
+                labels:Object.keys(dados.consultores).slice(0,8),
+                datasets:[{
+                    label:'Vendas',
+                    data:Object.values(dados.consultores).slice(0,8),
+                    backgroundColor:'#ff6b00'
+                }]
+            },
+
+            options:{
+                responsive:true,
+                maintainAspectRatio:false,
+                plugins:{
+                    legend:{
+                        labels:{color:'#fff'}
+                    }
+                },
+                scales:{
+                    x:{ticks:{color:'#8090a8'}},
+                    y:{ticks:{color:'#8090a8'}}
+                }
+            }
+
+        });
+
+        new Chart(document.getElementById('graficoSituacao'), {
+
+            type:'pie',
+
+            data:{
+                labels:Object.keys(dados.situacao),
+                datasets:[{
+                    data:Object.values(dados.situacao),
+                    backgroundColor:[
+                        '#3b82f6',
+                        '#ef4444',
+                        '#00c896',
+                        '#ff6b00',
+                        '#8b5cf6'
+                    ]
+                }]
+            },
+
+            options:{
+                responsive:true,
+                maintainAspectRatio:false,
+                plugins:{
+                    legend:{
+                        labels:{color:'#fff'}
+                    }
+                }
+            }
+
+        });
+
+        const tabela = document.getElementById('tabelaVendas');
+
+        dados.latest.slice(0,10).forEach(item => {
+
+            let classe = 'pendente';
+
+            if(item.situacao === 'Liquidado'){
+                classe = 'liquidado';
+            }
+
+            if(item.situacao === 'Cancelado'){
+                classe = 'cancelado';
+            }
+
+            tabela.innerHTML += `
+
+                <tr>
+                    <td>${item.consultor}</td>
+                    <td>${item.loja}</td>
+                    <td>${item.data}</td>
+                    <td>
+                        <span class="status ${classe}">
+                            ${item.situacao}
+                        </span>
+                    </td>
+                    <td>${moeda(item.valor)}</td>
+                </tr>
+
+            `;
+
+        });
+
+    </script>
+
+</body>
+</html>

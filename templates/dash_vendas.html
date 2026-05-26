@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>JB Proteção — Vendas</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet"
+    />
+
+    <style>
+        body {
+            background-color: #0B1120;
+            color: #F8FAFC;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .card {
+            background-color: #1E293B;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+        }
+
+        canvas {
+            max-height: 280px;
+        }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0B1120; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+        .kpi-card {
+            background: rgba(30, 41, 59, 0.4);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(71, 85, 105, 0.3);
+            border-radius: 1rem;
+        }
+
+        .filter-input {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #f8fafc;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            outline: none;
+            transition: border-color .2s;
+        }
+
+        .filter-input:focus {
+            border-color: #f97316;
+        }
+    </style>
+</head>
+
+<body class="p-4 md:p-8">
+
+<!-- LOGO JB PROTEÇÃO -->
+<div style="margin:0 0 12px;text-align:center;">
+  <div style="display:inline-flex;align-items:center;gap:16px;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(251,146,60,.05));border:1px solid rgba(249,115,22,.22);border-radius:22px;padding:14px 30px;box-shadow:0 0 50px rgba(249,115,22,.1),0 4px 24px rgba(0,0,0,.3);">
+    <svg width="44" height="48" viewBox="0 0 44 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="jbshield" x1="22" y1="0" x2="22" y2="48" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#fb923c"/>
+          <stop offset="100%" stop-color="#b45309"/>
+        </linearGradient>
+        <filter id="jbglow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <path filter="url(#jbglow)" d="M22 2L3 10v14c0 13 8.5 24.5 19 27 10.5-2.5 19-14 19-27V10L22 2z" fill="url(#jbshield)"/>
+      <text x="22" y="29" font-family="Arial Black,sans-serif" font-size="13" font-weight="900" fill="white" text-anchor="middle" letter-spacing="-0.5">JB</text>
+    </svg>
+    <div style="text-align:left;">
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:26px;font-weight:900;line-height:1;letter-spacing:-0.5px;">
+        <span style="background:linear-gradient(90deg,#fb923c,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">JB</span><span style="color:rgba(255,255,255,.95);margin-left:8px;">PROTEÇÃO</span>
+      </div>
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:9px;letter-spacing:.38em;color:rgba(148,163,184,.7);font-weight:700;text-transform:uppercase;margin-top:5px;">
+        Plataforma de Gestão Comercial
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NAV SUPERIOR -->
+<nav class="mb-4 flex items-center justify-between" style="background:#1E293B; border-radius:12px; padding:10px 16px;">
+    <div style="display:flex; gap:8px;">
+        <a href="/financeiro" style="background:#0B1120; color:#9ca3af; padding:6px 12px; border-radius:8px; font-size:11px; font-weight:700; text-decoration:none;">Financeiro</a>
+        <a href="/eventos" style="background:#0B1120; color:#9ca3af; padding:6px 12px; border-radius:8px; font-size:11px; font-weight:700; text-decoration:none;">Eventos</a>
+        <a href="/vendas" style="background:#f97316; color:black; padding:6px 12px; border-radius:8px; font-size:11px; font-weight:900; text-decoration:none;">Vendas</a>
+    </div>
+    <a href="/logout" style="color:#6b7280; font-size:11px; font-weight:700; text-decoration:none;">Sair</a>
+</nav>
+
+<!-- OVERLAY DE CARREGAMENTO -->
+<div
+    id="loading-overlay"
+    class="hidden fixed inset-0 z-[9998] flex items-center justify-center"
+    style="background:rgba(11,17,32,0.8);backdrop-filter:blur(4px)"
+>
+    <div class="card flex items-center gap-3 px-8 py-5 text-sm font-semibold">
+        <svg class="animate-spin h-5 w-5 text-orange-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+        </svg>
+        Carregando dados...
+    </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="hidden fixed bottom-6 right-6 z-[9999] max-w-sm">
+    <div id="toast-inner" class="card px-5 py-3 text-sm font-semibold"></div>
+</div>
+
+<!-- HEADER -->
+<header class="flex flex-col gap-4 mb-8 border-b border-gray-800 pb-6">
+
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center font-bold text-xl text-white shadow-lg shadow-orange-500/30">
+                JB
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold text-white tracking-tight">
+                    Dashboard Executivo
+                </h1>
+                <p class="text-sm text-gray-400 mt-1">
+                    Vendas · Base atualizada
+                </p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3"></div>
+
+    </div>
+
+    <!-- FILTROS -->
+    <div class="flex flex-wrap gap-3 items-end">
+
+        <!-- BASES DROPDOWN -->
+        <div class="relative">
+            <button
+                id="dropdown-button"
+                class="filter-input w-52 text-left flex items-center justify-between gap-2">
+                <span id="dropdown-label">Todas as Bases</span>
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </button>
+            <div
+                id="dropdown-menu"
+                class="hidden absolute mt-1 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto">
+                <label class="flex items-center gap-2 p-2 hover:bg-slate-800 cursor-pointer text-sm">
+                    <input type="checkbox" value="ALL" checked id="check-all">
+                    Todas as Bases
+                </label>
+                <div id="base-options"></div>
+            </div>
+        </div>
+
+        <!-- DATA INICIAL -->
+        <div class="flex flex-col gap-1">
+            <label class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">
+                Emissão Inicial
+            </label>
+            <input
+                id="filtro-data-inicial"
+                type="date"
+                class="filter-input">
+        </div>
+
+        <!-- DATA FINAL -->
+        <div class="flex flex-col gap-1">
+            <label class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">
+                Emissão Final
+            </label>
+            <input
+                id="filtro-data-final"
+                type="date"
+                class="filter-input">
+        </div>
+
+        <!-- BOTÃO ATUALIZAR -->
+        <button
+            id="btn-atualizar"
+            class="bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm px-5 py-2 rounded-lg transition-colors">
+            Atualizar
+        </button>
+
+        <button
+            id="btn-exportar"
+            class="filter-input font-semibold text-sm px-5 py-2"
+            title="Exportar tabela filtrada como CSV">
+            Exportar CSV
+        </button>
+
+        <button
+            id="btn-auto-refresh"
+            class="filter-input font-semibold text-sm px-5 py-2"
+            title="Atualizar automaticamente a cada 5 minutos">
+            Auto-Refresh
+        </button>
+
+        <button
+            id="btn-sync-siprov"
+            class="filter-input font-semibold text-sm px-5 py-2 flex items-center gap-2"
+            style="background:#ea580c; color:#fff;"
+            title="Forçar sincronização com a API Siprov agora">
+            <span id="sync-icon">⟳</span>
+            <span id="sync-label">Sync Siprov</span>
+        </button>
+
+    </div>
+
+    <div class="mt-3 text-xs text-slate-400 flex items-center gap-3" id="sync-status-bar">
+        <span id="sync-status-text">Carregando estado da sincronização…</span>
+    </div>
+
+</header>
+
+<!-- KPIs -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+
+    <div class="kpi-card p-4 shadow-xl border-2 border-blue-500/50">
+        <div class="flex justify-between items-start mb-4">
+            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Total Vendas</span>
+            <div class="bg-slate-800 p-2 rounded-lg text-xl">📊</div>
+        </div>
+        <h2 id="kpi-vendas" class="text-1xl font-extrabold text-blue-400 tracking-tight">0</h2>
+    </div>
+
+    <div class="kpi-card p-4 shadow-xl border-2 border-emerald-500/50">
+        <div class="flex justify-between items-start mb-4">
+            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Valor Liquidado</span>
+            <div class="bg-slate-800 p-2 rounded-lg text-xl">💰</div>
+        </div>
+        <h2 id="kpi-liquidado" class="text-1xl font-extrabold text-emerald-400 tracking-tight">R$ 0,00</h2>
+    </div>
+
+    <div class="kpi-card p-4 shadow-xl border-2 border-orange-500/50">
+        <div class="flex justify-between items-start mb-4">
+            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Carteira Total</span>
+            <div class="bg-slate-800 p-2 rounded-lg text-xl">📁</div>
+        </div>
+        <h2 id="kpi-carteira" class="text-1xl font-extrabold text-white tracking-tight">R$ 0,00</h2>
+    </div>
+
+    <div class="kpi-card p-4 shadow-xl border-2 border-purple-500/50">
+        <div class="flex justify-between items-start mb-4">
+            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Ticket Médio</span>
+            <div class="bg-slate-800 p-2 rounded-lg text-xl">💎</div>
+        </div>
+        <h2 id="kpi-ticket" class="text-1xl font-extrabold text-white tracking-tight">R$ 0,00</h2>
+    </div>
+
+    <div class="kpi-card p-4 shadow-xl border-2 border-yellow-500/50">
+        <div class="flex justify-between items-start mb-4">
+            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Regionais</span>
+            <div class="bg-slate-800 p-2 rounded-lg text-xl">🏢</div>
+        </div>
+        <h2 id="kpi-base" class="text-1xl font-extrabold text-white tracking-tight">0</h2>
+    </div>
+
+</div>
+
+<!-- GRÁFICOS — LINHA 1 -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+
+    <div class="card lg:col-span-2">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Evolução Mensal de Vendas
+        </h2>
+        <canvas id="chart-evolucao"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Situação da Carteira
+        </h2>
+        <canvas id="chart-situacao"></canvas>
+    </div>
+
+</div>
+
+<!-- GRÁFICOS — LINHA 2 -->
+<div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Top 10 Consultores
+        </h2>
+        <canvas id="chart-consultores"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Top 10 Representantes
+        </h2>
+        <canvas id="chart-representantes"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Vendas por Regional
+        </h2>
+        <canvas id="chart-lojas"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Categorias de Veículos
+        </h2>
+        <canvas id="chart-categorias"></canvas>
+    </div>
+
+</div>
+
+<!-- TABELA -->
+<div class="card overflow-hidden">
+
+    <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide">
+            Registro Detalhado de Adesões
+        </h2>
+
+        <div class="flex flex-wrap gap-2 items-center">
+
+            <input
+                type="text"
+                id="filtro-cliente"
+                placeholder="Buscar cliente..."
+                class="filter-input w-44 text-xs"
+            />
+
+            <input
+                type="text"
+                id="filtro-consultor-tabela"
+                placeholder="Buscar consultor..."
+                class="filter-input w-44 text-xs"
+            />
+
+            <input
+                type="text"
+                id="filtro-placa"
+                placeholder="Placa..."
+                class="filter-input w-32 text-xs"
+            />
+
+            <button
+                id="btn-limpar-tabela"
+                class="text-xs text-gray-400 hover:text-white px-3 py-2 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+                Limpar
+            </button>
+
+            <span id="table-count" class="text-xs text-gray-500"></span>
+
+        </div>
+
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-gray-300">
+            <thead class="text-xs text-gray-400 uppercase bg-slate-800 border-b border-gray-700">
+                <tr>
+                    <th class="px-4 py-3">Data Emissão</th>
+                    <th class="px-4 py-3">Cliente</th>
+                    <th class="px-4 py-3">Consultor</th>
+                    <th class="px-4 py-3">Placa</th>
+                    <th class="px-4 py-3">Regional</th>
+                    <th class="px-4 py-3">Situação</th>
+                    <th class="px-4 py-3 text-right">Valor</th>
+                </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+        </table>
+    </div>
+
+</div>
+
+<script>
+
+// =========================================================
+// ESTADO
+// =========================================================
+
+const charts = {};
+let tabelaOperacional  = [];
+let basesSelecionadas  = ['ALL'];
+let filtroDataInicial  = null;
+let filtroDataFinal    = null;
+
+// =========================================================
+// UTILITÁRIOS
+// =========================================================
+
+function fmtBRL(v) {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+}
+
+function fmtNum(v) {
+    return new Intl.NumberFormat('pt-BR').format(Number(v || 0));
+}
+
+function fmtDate(s) {
+    if (!s) return 'N/A';
+    const d = new Date(s + 'T00:00:00');
+    return d.toLocaleDateString('pt-BR');
+}
+
+let _toastTimer = null;
+function showToast(msg, type = 'error') {
+    const el    = document.getElementById('toast');
+    const inner = document.getElementById('toast-inner');
+    inner.className = `card px-5 py-3 text-sm font-semibold ${type === 'error' ? 'text-red-400' : 'text-emerald-400'}`;
+    inner.textContent = msg;
+    el.classList.remove('hidden');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.add('hidden'), 4500);
+}
+
+function setLoading(ativo) {
+    document.getElementById('loading-overlay').classList.toggle('hidden', !ativo);
+    const btn = document.getElementById('btn-atualizar');
+    btn.disabled    = ativo;
+    btn.textContent = ativo ? 'Carregando...' : 'Atualizar';
+}
+
+// =========================================================
+// KPIs
+// =========================================================
+
+function renderKPIs(cards) {
+    document.getElementById('kpi-vendas').textContent   = fmtNum(cards.total_vendas);
+    document.getElementById('kpi-liquidado').textContent = fmtBRL(cards.valor_liquidado);
+    document.getElementById('kpi-carteira').textContent  = fmtBRL(cards.carteira_total);
+    document.getElementById('kpi-ticket').textContent    = fmtBRL(cards.ticket_medio);
+    document.getElementById('kpi-base').textContent      = fmtNum(cards.regionais);
+}
+
+// =========================================================
+// CHARTS
+// =========================================================
+
+function renderBarChart(id, labels, data, color) {
+    if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+
+    charts[id] = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{ data, backgroundColor: color, borderRadius: 4, borderSkipped: false }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => ' ' + fmtNum(ctx.raw) } },
+            },
+            scales: {
+                x: { ticks: { color: '#CBD5E1' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y: { ticks: { color: '#CBD5E1', callback: v => fmtNum(v) }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            },
+        },
+    });
+}
+
+function renderLineChart(id, labels, data, color) {
+    if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+
+    charts[id] = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                data,
+                borderColor: color,
+                backgroundColor: color + '20',
+                borderWidth: 3,
+                tension: 0.4,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                fill: true,
+            }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => ' ' + fmtNum(ctx.raw) } },
+            },
+            scales: {
+                x: { ticks: { color: '#CBD5E1' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y: { ticks: { color: '#CBD5E1', callback: v => fmtNum(v) }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            },
+        },
+    });
+}
+
+function renderDonut(id, labels, data) {
+    if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+
+    charts[id] = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels,
+            datasets: [{
+                data,
+                backgroundColor: ['#10B981','#F59E0B','#EF4444','#3B82F6','#8B5CF6','#F97316'],
+            }],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'right', labels: { color: '#CCC', font: { size: 11 } } },
+                tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${fmtNum(ctx.raw)}` } },
+            },
+        },
+    });
+}
+
+function renderGraficos(g) {
+    renderLineChart('chart-evolucao',       g.evolucao.labels,       g.evolucao.valores,       '#F97316');
+    renderDonut(    'chart-situacao',       g.situacao.labels,       g.situacao.valores);
+    renderBarChart( 'chart-consultores',    g.consultores.labels,    g.consultores.valores,    '#3B82F6');
+    renderBarChart( 'chart-representantes', g.representantes.labels, g.representantes.valores, '#22C55E');
+    renderBarChart( 'chart-lojas',          g.por_regional.labels,   g.por_regional.valores,   '#8B5CF6');
+    renderDonut(    'chart-categorias',     g.categorias.labels,     g.categorias.valores);
+}
+
+// =========================================================
+// TABELA
+// =========================================================
+
+function renderTabela(dados) {
+    const tbody   = document.getElementById('table-body');
+    const counter = document.getElementById('table-count');
+
+    if (!dados || dados.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center p-8 text-gray-500">
+                    Nenhum registro encontrado
+                </td>
+            </tr>`;
+        counter.textContent = '0 registros';
+        return;
+    }
+
+    counter.textContent = fmtNum(dados.length) + ' registros';
+
+    tbody.innerHTML = dados.slice(0, 500).map(item => `
+        <tr class="border-b border-gray-700 hover:bg-slate-700/30">
+            <td class="px-4 py-3 text-gray-400">${fmtDate(item.data_emissao)}</td>
+            <td class="px-4 py-3 truncate max-w-[180px] font-medium">${item.cliente || 'N/A'}</td>
+            <td class="px-4 py-3 text-xs text-gray-300">${item.consultor || 'N/A'}</td>
+            <td class="px-4 py-3 font-mono text-orange-400">${item.placa || 'N/A'}</td>
+            <td class="px-4 py-3 text-xs">${item.unidade || 'N/A'}</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 rounded text-[10px] font-bold ${
+                    (item.situacao || '').includes('LIQUID')
+                        ? 'bg-green-900 text-green-200'
+                        : 'bg-yellow-900 text-yellow-200'
+                }">
+                    ${item.situacao || 'N/A'}
+                </span>
+            </td>
+            <td class="px-4 py-3 text-right font-semibold">${fmtBRL(item.valor_titulo)}</td>
+        </tr>
+    `).join('');
+}
+
+function filtrarTabela() {
+    const cliente   = (document.getElementById('filtro-cliente').value          || '').toLowerCase().trim();
+    const consultor = (document.getElementById('filtro-consultor-tabela').value || '').toLowerCase().trim();
+    const placa     = (document.getElementById('filtro-placa').value             || '').toLowerCase().trim();
+
+    const filtrado = tabelaOperacional.filter(item => {
+        if (cliente   && !(item.cliente  || '').toLowerCase().includes(cliente))   return false;
+        if (consultor && !(item.consultor|| '').toLowerCase().includes(consultor)) return false;
+        if (placa     && !(item.placa    || '').toLowerCase().includes(placa))     return false;
+        return true;
+    });
+
+    renderTabela(filtrado);
+}
+
+// Debounce 280ms
+let _debounce = null;
+function debouceFiltro() {
+    clearTimeout(_debounce);
+    _debounce = setTimeout(filtrarTabela, 280);
+}
+
+['filtro-cliente', 'filtro-consultor-tabela', 'filtro-placa'].forEach(id => {
+    document.getElementById(id).addEventListener('input', debouceFiltro);
+    document.getElementById(id).addEventListener('keydown', e => {
+        if (e.key === 'Enter') { clearTimeout(_debounce); filtrarTabela(); }
+    });
+});
+
+document.getElementById('btn-limpar-tabela').addEventListener('click', () => {
+    document.getElementById('filtro-cliente').value           = '';
+    document.getElementById('filtro-consultor-tabela').value  = '';
+    document.getElementById('filtro-placa').value             = '';
+    renderTabela(tabelaOperacional);
+});
+
+// =========================================================
+// API
+// =========================================================
+
+async function loadData() {
+    try {
+        setLoading(true);
+
+        const params = new URLSearchParams({
+            data_inicial: filtroDataInicial || '',
+            data_final:   filtroDataFinal   || '',
+            _ts:          Date.now(),
+        });
+
+        if (!basesSelecionadas.includes('ALL')) {
+            basesSelecionadas.forEach(b => params.append('bases', b));
+        }
+
+        const res = await fetch('/api/vendas?' + params.toString());
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.erro || `HTTP ${res.status}`);
+        }
+
+        const json = await res.json();
+        if (json.erro) throw new Error(json.erro);
+
+        tabelaOperacional = json.tabela || [];
+
+        popularFiltroBases(json.bases_lista || []);
+        atualizarURL();
+        renderKPIs(json.cards || {});
+        renderGraficos(json.graficos || {
+            evolucao: {labels:[],valores:[]}, situacao: {labels:[],valores:[]},
+            consultores: {labels:[],valores:[]}, representantes: {labels:[],valores:[]},
+            por_regional: {labels:[],valores:[]}, categorias: {labels:[],valores:[]},
+        });
+        renderTabela(tabelaOperacional);
+
+    } catch (err) {
+        console.error('[Vendas]', err);
+        showToast('Erro ao carregar dashboard: ' + err.message, 'error');
+        document.getElementById('table-body').innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center p-8 text-red-400 font-semibold">
+                    ${err.message}
+                </td>
+            </tr>`;
+    } finally {
+        setLoading(false);
+    }
+}
+
+// =========================================================
+// DROPDOWN DE BASES
+// =========================================================
+
+function popularFiltroBases(lista) {
+    const container = document.getElementById('base-options');
+
+    container.innerHTML = lista.map(base => `
+        <label class="flex items-center gap-2 p-2 hover:bg-slate-800 cursor-pointer text-sm">
+            <input type="checkbox" value="${base}" class="base-checkbox"
+                ${basesSelecionadas.includes('ALL') || basesSelecionadas.includes(base) ? 'checked' : ''}>
+            ${base}
+        </label>
+    `).join('');
+
+    container.addEventListener('change', () => {
+        const sel = Array.from(document.querySelectorAll('.base-checkbox:checked')).map(i => i.value);
+        if (sel.length === 0) {
+            basesSelecionadas = ['ALL'];
+            document.getElementById('check-all').checked = true;
+        } else {
+            basesSelecionadas = sel;
+            document.getElementById('check-all').checked = false;
+        }
+        _atualizarLabelBases();
+    });
+}
+
+function _atualizarLabelBases() {
+    const label = document.getElementById('dropdown-label');
+    label.textContent = basesSelecionadas.includes('ALL')
+        ? 'Todas as Bases'
+        : basesSelecionadas.length === 1
+            ? basesSelecionadas[0]
+            : basesSelecionadas.length + ' bases selecionadas';
+}
+
+const dropdownButton = document.getElementById('dropdown-button');
+const dropdownMenu   = document.getElementById('dropdown-menu');
+
+dropdownButton.addEventListener('click', e => {
+    e.stopPropagation();
+    dropdownMenu.classList.toggle('hidden');
+});
+
+document.addEventListener('click', () => dropdownMenu.classList.add('hidden'));
+
+document.getElementById('check-all').addEventListener('change', e => {
+    if (e.target.checked) {
+        // voltou para "todas" — limpa seleção individual
+        basesSelecionadas = ['ALL'];
+        document.querySelectorAll('.base-checkbox').forEach(cb => cb.checked = false);
+    } else {
+        // saiu do modo "todas" — marca todos individualmente para o usuário desmarcar os que não quer
+        const todos = Array.from(document.querySelectorAll('.base-checkbox'));
+        todos.forEach(cb => cb.checked = true);
+        basesSelecionadas = todos.map(cb => cb.value);
+    }
+    _atualizarLabelBases();
+});
+
+// =========================================================
+// FILTROS DE DATA
+// =========================================================
+
+document.getElementById('filtro-data-inicial').addEventListener('change', e => {
+    filtroDataInicial = e.target.value || null;
+    loadData();
+});
+
+document.getElementById('filtro-data-final').addEventListener('change', e => {
+    filtroDataFinal = e.target.value || null;
+    loadData();
+});
+
+document.getElementById('btn-atualizar').addEventListener('click', loadData);
+
+// =========================================================
+// EXPORTAR CSV
+// =========================================================
+
+function exportarCSV() {
+    const params = new URLSearchParams({
+        data_inicial: filtroDataInicial || '',
+        data_final:   filtroDataFinal   || '',
+    });
+    if (!basesSelecionadas.includes('ALL')) {
+        basesSelecionadas.forEach(b => params.append('bases', b));
+    }
+    window.location.href = '/api/vendas/export?' + params.toString();
+}
+
+document.getElementById('btn-exportar').addEventListener('click', exportarCSV);
+
+// =========================================================
+// AUTO-REFRESH
+// =========================================================
+
+let _arInterval  = null;
+let _arCountdown = 0;
+const AR_SEGUNDOS = 300;
+
+function toggleAutoRefresh() {
+    const btn = document.getElementById('btn-auto-refresh');
+    if (_arInterval) {
+        clearInterval(_arInterval);
+        _arInterval = null;
+        btn.textContent = 'Auto-Refresh';
+        btn.style.background = '#1e293b';
+        btn.style.color = '#f8fafc';
+    } else {
+        _arCountdown = AR_SEGUNDOS;
+        btn.style.background = '#f97316';
+        btn.style.color = 'black';
+        _arInterval = setInterval(() => {
+            _arCountdown--;
+            const m = String(Math.floor(_arCountdown / 60)).padStart(2, '0');
+            const s = String(_arCountdown % 60).padStart(2, '0');
+            btn.textContent = `ON (${m}:${s})`;
+            if (_arCountdown <= 0) {
+                _arCountdown = AR_SEGUNDOS;
+                loadData();
+            }
+        }, 1000);
+    }
+}
+
+document.getElementById('btn-auto-refresh').addEventListener('click', toggleAutoRefresh);
+
+// =========================================================
+// URL STATE
+// =========================================================
+
+function atualizarURL() {
+    const p = new URLSearchParams();
+    if (filtroDataInicial) p.set('di', filtroDataInicial);
+    if (filtroDataFinal)   p.set('df', filtroDataFinal);
+    if (!basesSelecionadas.includes('ALL')) {
+        basesSelecionadas.forEach(b => p.append('base', b));
+    }
+    const q = p.toString();
+    history.replaceState(null, '', q ? '?' + q : window.location.pathname);
+}
+
+function lerURLParams() {
+    const p = new URLSearchParams(window.location.search);
+    filtroDataInicial = p.get('di') || null;
+    filtroDataFinal   = p.get('df') || null;
+    const bases = p.getAll('base');
+    basesSelecionadas = bases.length > 0 ? bases : ['ALL'];
+
+    document.getElementById('filtro-data-inicial').value = filtroDataInicial || '';
+    document.getElementById('filtro-data-final').value   = filtroDataFinal   || '';
+}
+
+// =========================================================
+// LOAD
+// =========================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    lerURLParams();
+    loadData();
+});
+
+window.recarregarDashboard = loadData;
+
+</script>
+
+<script src="{{ url_for('static', filename='sync_siprov.js') }}"></script>
+
+</body>
+</html>
