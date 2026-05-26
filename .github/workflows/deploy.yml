@@ -13,14 +13,6 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Debug token
-        run: |
-          echo "Token definido: $( [ -n "$RAILWAY_TOKEN" ] && echo 'SIM' || echo 'NAO' )"
-          echo "Primeiros 8 chars: ${RAILWAY_TOKEN:0:8}"
-          railway whoami
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-
       - name: Deploy to Railway
         run: railway up --service 354d6cc3-18d3-4e14-9f44-aedcd52acb98 --detach
         env:
