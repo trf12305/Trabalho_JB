@@ -11,11 +11,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Railway CLI
-        run: npm install -g @railway/cli
+        run: bash <(curl -fsSL cli.new/railway)
 
       - name: Deploy to Railway
-        run: railway up --service 354d6cc3-18d3-4e14-9f44-aedcd52acb98 --detach
+        run: railway up --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE_ID: 354d6cc3-18d3-4e14-9f44-aedcd52acb98
           RAILWAY_PROJECT_ID: 17c5f4ac-5524-4942-bc0f-0e822a72f17d
           RAILWAY_ENVIRONMENT_ID: e835c0c9-51bb-45f5-9152-b1391ac8c343
