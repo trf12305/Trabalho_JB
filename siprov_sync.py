@@ -387,7 +387,7 @@ def coletar_titulos(token: str) -> list[dict]:
         mês de SIPROV_DATA_FINAL (ou hoje+SIPROV_MESES_FUTUROS, default 6 meses).
       - Senão: puxa SIPROV_MESES_BACK meses para trás a partir de hoje (default 3).
     """
-    log.info("Coletando títulos financeiros (tipo=Crédito + situacao=Liquidado)...")
+    log.info("Coletando títulos financeiros (tipos=Crédito+Débito + situacoes=Aberto+Pendente+Liquidado)...")
 
     hoje = date.today()
     data_ini_str = os.environ.get("SIPROV_DATA_INICIAL", "").strip()
@@ -479,7 +479,10 @@ def coletar_titulos(token: str) -> list[dict]:
         # Status a coletar (Aberto + Pendente + Liquidado por padrão)
         situacoes = os.environ.get("SIPROV_SITUACOES", "Aberto,Pendente,Liquidado").split(",")
         situacoes = [s.strip() for s in situacoes if s.strip()]
-        log.info(f"  Iniciando coleta paralela de {len(meses_a_buscar)} meses x {len(situacoes)} status com {max_workers} threads…")
+        # Tipos a coletar (Crédito + Débito por padrão para bater com relatório nativo)
+        tipos = os.environ.get("SIPROV_TIPOS", "Crédito,Débito").split(",")
+        tipos = [t.strip() for t in tipos if t.strip()]
+        log.info(f"  Iniciando coleta paralela de {len(meses_a_buscar)} meses x {len(situacoes)} situacoes x {len(tipos)} tipos com {max_workers} threads…")
 
         def _buscar_mes(ano_mes):
             ano, mes = ano_mes
@@ -489,11 +492,12 @@ def coletar_titulos(token: str) -> list[dict]:
                 _set(mensagem=f"Buscando títulos de {mes:02d}/{ano}…")
 
             itens_mes = []
-            for sit in situacoes:
-                itens_sit = _coletar_pagina_mes(token, "Crédito", sit, di, df,
-                                                  total_acumulado_inicial=0)
-                log.info(f"  [thread] {mes:02d}/{ano} {sit}: {len(itens_sit)}")
-                itens_mes.extend(itens_sit)
+            for tipo in tipos:
+                for sit in situacoes:
+                    itens_sit = _coletar_pagina_mes(token, tipo, sit, di, df,
+                                                      total_acumulado_inicial=0)
+                    log.info(f"  [thread] {mes:02d}/{ano} {tipo}/{sit}: {len(itens_sit)}")
+                    itens_mes.extend(itens_sit)
 
             log.info(f"  [thread] {mes:02d}/{ano} TOTAL: {len(itens_mes)} títulos")
 
