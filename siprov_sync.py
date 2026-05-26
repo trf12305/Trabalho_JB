@@ -4,6 +4,9 @@ siprov_sync.py
 Integração automática entre a Siprov API e o dashboard JB Proteção.
 Campos mapeados diretamente do OpenAPI oficial da Siprov (v1.81).
 
+Usa o endpoint de RELATÓRIO (POST /ext/relatorio/financeiro) para
+obter dados idênticos ao "Relatório de Contas a Receber" nativo do Siprov.
+
 Instale:  pip install requests schedule python-dotenv
 Configure no .env:
   SIPROV_USUARIO=seu.email@empresa.com
@@ -181,6 +184,35 @@ def _get(token: str, path: str, params: dict = None, timeout=(15, 180)) -> dict 
     return resp.json()
 
 
+def _post(token: str, path: str, body: dict = None, timeout=(15, 60)) -> dict | list:
+    """HTTP POST autenticado com Bearer token."""
+    resp = _session().post(
+        f"{SIPROV_BASE_URL}{path}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=body or {},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _options(token: str, path: str, timeout=(10, 30)) -> dict:
+    """HTTP OPTIONS autenticado (Siprov usa para verificar status de relatório)."""
+    resp = _session().options(
+        f"{SIPROV_BASE_URL}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    try:
+        return resp.json() if resp.content else {}
+    except Exception:
+        return {}
+
+
 # ─────────────────────────────────────────────
 #  MAPEAMENTO — TituloOutputTO → formato do dashboard
 #
@@ -214,15 +246,15 @@ def _get(token: str, path: str, params: dict = None, timeout=(15, 180)) -> dict 
 
 def titulo_para_registro(titulo: dict, associado: dict = None) -> dict:
     """
-    Converte ItemTituloOutputTO (lista) + PesquisaAssociadoOutputTO
-    para o formato exato esperado pelo app.py.
+    Converte um registro de título para o formato esperado pelo app.py.
 
-    Schema real confirmado no SwaggerHub v1.81:
-      ItemTituloOutputTO: celular, codPessoa, codTitulo, cpfCnpjPessoa,
-        dataEmissao, dataLiquidacao, dataVencimento, descricao,
-        nomeDevedorCredor, nomeLoja, sequencialBeneficio[], situacao, tipo,
-        valor, valorLiquidado
-      (sem beneficios[] nem liquidacoes[] — esses só existem no endpoint /titulo/{id})
+    Suporta dois formatos de entrada (com fallback automático):
+      • ItemTituloOutputTO  — endpoint de lista GET /ext/financeiro/titulo
+        campos: nomeDevedorCredor, sequencialBeneficio[], tipo,
+                valorLiquidado, dataLiquidacao (campos diretos)
+      • TituloOutputTO  — endpoint de relatório POST /ext/relatorio/financeiro
+        campos: nomePessoa, beneficios[].codBeneficio, tipoLancamento,
+                liquidacoes[].valor / .dataLiquidacao (nested)
     """
     a = associado or {}
 
@@ -239,69 +271,116 @@ def titulo_para_registro(titulo: dict, associado: dict = None) -> dict:
     elif planos:
         plano_principal = str(planos[0])
 
-    # Sequencial do benefício: vem do array sequencialBeneficio[] no titulo,
-    # ou do campo sequencial do associado
+    # Sequencial do benefício:
+    #   ItemTituloOutputTO: sequencialBeneficio[] (array de ints)
+    #   TituloOutputTO:     beneficios[].codBeneficio (array de objetos)
     seq_lista = titulo.get("sequencialBeneficio") or []
-    beneficio_seq = seq_lista[0] if seq_lista else _safe(a.get("sequencial") or a.get("codBeneficio"))
+    if not seq_lista:
+        bens = titulo.get("beneficios") or []
+        seq_lista = [
+            b.get("codBeneficio")
+            for b in bens
+            if isinstance(b, dict) and b.get("codBeneficio")
+        ]
+    beneficio_seq = seq_lista[0] if seq_lista else _safe(
+        a.get("sequencial") or a.get("codBeneficio")
+    )
+
+    # Nome da pessoa:
+    #   ItemTituloOutputTO: nomeDevedorCredor
+    #   TituloOutputTO:     nomePessoa
+    nome = _safe(
+        titulo.get("nomeDevedorCredor")
+        or titulo.get("nomePessoa")
+        or a.get("nomePessoa")
+    )
+
+    # Tipo de lançamento:
+    #   ItemTituloOutputTO: tipo → "Crédito", "Débito", "Rateio"
+    #   TituloOutputTO:     tipoLancamento → "CREDITO", "DEBITO", "RATEIO"
+    tipo = _safe(titulo.get("tipo") or titulo.get("tipoLancamento"))
+
+    # Liquidação:
+    #   ItemTituloOutputTO: valorLiquidado e dataLiquidacao como campos diretos
+    #   TituloOutputTO:     liquidacoes[] → TituloLiquidacaoOutputTO
+    data_liq    = _data(_safe(titulo.get("dataLiquidacao")))
+    valor_liq   = _float(titulo.get("valorLiquidado", 0))
+    tipo_liq    = ""
+    conta_liq   = ""
+    desconto    = 0.0
+    usuario_liq = ""
+
+    liquidacoes = titulo.get("liquidacoes") or []
+    if liquidacoes and isinstance(liquidacoes[0], dict):
+        liq = liquidacoes[0]  # usa a primeira liquidação
+        if not data_liq:
+            data_liq = _data(_safe(
+                liq.get("dataLiquidacao") or liq.get("dataCredito")
+            ))
+        if not valor_liq:
+            valor_liq = _float(liq.get("valor", 0))
+        tipo_liq    = _safe(liq.get("nomeTipoLiquidacao"))
+        conta_liq   = _safe(liq.get("descricaoConta") or liq.get("descricaoCaixa"))
+        desconto    = _float(liq.get("desconto", 0))
+        usuario_liq = _safe(liq.get("nomeLiquidante"))
 
     return {
         # ── Benefício ──────────────────────────────────────
-        "beneficio_sequencial":        beneficio_seq,
-        "beneficio_data_adesao":       _data(_safe(a.get("dataAdesao"))),
-        # consultor/representante não disponíveis no endpoint de lista
-        "beneficio_consultor":         "",
-        "beneficio_representante":     "",
-        "beneficio_valor_mensalidade": mensalidade,
-        "beneficio_planos_principais": plano_principal,
+        "beneficio_sequencial":          beneficio_seq,
+        "beneficio_data_adesao":         _data(_safe(a.get("dataAdesao"))),
+        "beneficio_consultor":           "",
+        "beneficio_representante":       "",
+        "beneficio_valor_mensalidade":   mensalidade,
+        "beneficio_planos_principais":   plano_principal,
 
         # ── Pessoa ─────────────────────────────────────────
-        # campo correto: nomeDevedorCredor (não nomePessoa)
-        "pessoa_nome_razao_social":    _safe(titulo.get("nomeDevedorCredor") or a.get("nomePessoa")),
-        "pessoa_cpf_cnpj":             _safe(titulo.get("cpfCnpjPessoa") or a.get("cpfCnpj")),
-        "pessoa_data_nascimento":      _data(_safe(a.get("dataNascimento"))),
-        "pessoa_sexo":                 _safe(a.get("sexo")),
+        "pessoa_nome_razao_social":      nome,
+        "pessoa_cpf_cnpj":               _safe(titulo.get("cpfCnpjPessoa") or a.get("cpfCnpj")),
+        "pessoa_data_nascimento":        _data(_safe(a.get("dataNascimento"))),
+        "pessoa_sexo":                   _safe(a.get("sexo")),
 
         # ── Endereço ───────────────────────────────────────
-        "endereco_cidade":             _safe(endereco.get("cidade")),
-        "endereco_uf":                 _safe(endereco.get("uf")),
+        "endereco_cidade":               _safe(endereco.get("cidade")),
+        "endereco_uf":                   _safe(endereco.get("uf")),
 
         # ── Unidade ────────────────────────────────────────
-        "unidade_nome_fantasia":       _safe(titulo.get("nomeLoja")),
-        "unidade_razao_social":        "",
+        "unidade_nome_fantasia":         _safe(titulo.get("nomeLoja")),
+        "unidade_razao_social":          "",
 
         # ── Título ─────────────────────────────────────────
-        # codTitulo usado como parcela (único por título, garante dedup correto)
-        "titulo_parcela":              _safe(titulo.get("codTitulo")),
-        "titulo_data_emissao":         _data(_safe(titulo.get("dataEmissao"))),
-        "titulo_data_vencimento":      _data(_safe(titulo.get("dataVencimento"))),
-        "titulo_situacao_titulo":      _safe(titulo.get("situacao")),
-        # campo correto: tipo (Débito/Crédito/Rateio), não nomeTipoTitulo
-        "titulo_tipo_titulo":          _safe(titulo.get("tipo")),
-        "titulo_descricao":            _safe(titulo.get("descricao")),
-        "titulo_valor":                _float(titulo.get("valor")),
-        "titulo_conta":                "",
-        "titulo_usuario_cadastro":     "",
+        "titulo_parcela":                _safe(titulo.get("codTitulo")),
+        "titulo_data_emissao":           _data(_safe(titulo.get("dataEmissao"))),
+        "titulo_data_vencimento":        _data(_safe(titulo.get("dataVencimento"))),
+        "titulo_situacao_titulo":        _safe(titulo.get("situacao")),
+        "titulo_tipo_titulo":            tipo,
+        "titulo_descricao":              _safe(titulo.get("descricao")),
+        "titulo_valor":                  _float(titulo.get("valor")),
+        "titulo_conta":                  "",
+        "titulo_usuario_cadastro":       _safe(titulo.get("nomeUsuarioCadastro")),
 
-        # ── Liquidação — campos diretos no ItemTituloOutputTO ──
-        "liquidacao_data_liquidacao":  _data(_safe(titulo.get("dataLiquidacao"))),
-        "liquidacao_valor_liquidado":  _float(titulo.get("valorLiquidado")),
-        # campos de detalhe de liquidação só existem em /titulo/{id}
-        "liquidacao_tipo_liquidacao":  "",
-        "liquidacao_conta_liquidacao": "",
-        "liquidacao_desconto":         0.0,
-        "liquidacao_usuario_liquidante": "",
+        # ── Liquidação ─────────────────────────────────────
+        "liquidacao_data_liquidacao":    data_liq,
+        "liquidacao_valor_liquidado":    valor_liq,
+        "liquidacao_tipo_liquidacao":    tipo_liq,
+        "liquidacao_conta_liquidacao":   conta_liq,
+        "liquidacao_desconto":           desconto,
+        "liquidacao_usuario_liquidante": usuario_liq,
 
         # ── Veículo ────────────────────────────────────────
-        "veiculo_placa_veiculo":       _safe(a.get("placa")),
-        # tipoBeneficio do associado indica categoria (ex: "Carro", "Moto")
-        "veiculo_categoria":           _safe(a.get("tipoBeneficio")),
-        "veiculo_marca_veiculo":       "",
-        "veiculo_valor_veiculo":       0.0,
+        "veiculo_placa_veiculo":         _safe(a.get("placa")),
+        "veiculo_categoria":             _safe(a.get("tipoBeneficio")),
+        "veiculo_marca_veiculo":         "",
+        "veiculo_valor_veiculo":         0.0,
     }
 
 
 # ─────────────────────────────────────────────
-#  COLETA — TÍTULOS (paginado)
+#  COLETA — TÍTULOS via /ext/relatorio/financeiro
+#
+#  Fluxo assíncrono:
+#    1. POST /ext/relatorio/financeiro  → recebe codRelatorio (situacao: "Pendente")
+#    2. OPTIONS /ext/relatorio/financeiro/{cod}  → poll até situacao != "Pendente"
+#    3. GET /ext/relatorio/financeiro/{cod}  → baixa o JSON com os títulos
 # ─────────────────────────────────────────────
 
 def _mes_inicio_fim(ano: int, mes: int) -> tuple[str, str]:
@@ -338,56 +417,121 @@ def _atualizar_dashboard_live(titulos_brutos: list, mapa_assoc: dict, lock=None)
     log.info(f"  [LIVE] {len(registros)} registros disponíveis no dashboard")
 
 
-def _coletar_pagina_mes(token: str, tipo: str, situacao: str, di: str, df: str,
-                         total_acumulado_inicial: int = 0) -> list[dict]:
-    """Pagina um único mês para um (tipo, situacao). Retorna todos os itens do período."""
-    todos = []
-    while True:
-        params = {
-            "tipo": tipo,
-            "situacao": situacao,
-            "dataVencimentoInicial": di,
-            "dataVencimentoFinal":   df,
-            "inicio": len(todos),
-        }
-        if SIPROV_COD_LOJA:
-            params["codLoja"] = SIPROV_COD_LOJA
+def _solicitar_relatorio(token: str, tipo_lancamento: str,
+                          situacoes: list[str], di: str, df: str) -> int | None:
+    """
+    Solicita a geração assíncrona de um relatório financeiro.
 
+    Args:
+        tipo_lancamento: "CREDITO" ou "DEBITO"
+        situacoes: lista de situações, ex. ["Aberto", "Pendente", "Liquidado"]
+        di, df: datas no formato dd/MM/yyyy (início e fim do vencimento)
+
+    Retorna codRelatorio (int) ou None se a API não retornar o código.
+    """
+    body: dict = {
+        "formato": "JSON",
+        "tipoLancamento": tipo_lancamento.upper(),
+        "situacaoTitulo": situacoes,
+        "dataVencimentoInicial": di,
+        "dataVencimentoFinal":   df,
+    }
+    if SIPROV_COD_LOJA:
         try:
-            resp = _get(token, "/ext/financeiro/titulo", params, timeout=(15, 180))
-        except requests.HTTPError as e:
-            log.error(f"    Erro HTTP no offset {params['inicio']}: {e}")
-            break
-        except requests.Timeout:
-            log.warning(f"    Timeout no offset {params['inicio']} — pulando lote")
-            break
+            body["codLoja"] = [int(SIPROV_COD_LOJA)]
+        except ValueError:
+            body["codLoja"] = [SIPROV_COD_LOJA]
 
-        itens = resp.get("itens", []) if isinstance(resp, dict) else (resp or [])
-        if not itens:
-            break
-        todos.extend(itens)
-        total = resp.get("quantidade", 0) if isinstance(resp, dict) else 0
-        log.info(f"    [{tipo}/{situacao} {di}–{df}] offset {params['inicio']}: +{len(itens)} (acum {len(todos)}/{total or '?'})")
-        _set(titulos_atual=total_acumulado_inicial + len(todos),
-             mensagem=f"Baixando {di}–{df} ({len(todos)}/{total or '?'})")
-        if total and len(todos) >= total:
-            break
-        if len(itens) < 100:  # API retorna 100 por página; menos = última página
-            break
-    return todos
+    log.info(f"    POST /ext/relatorio/financeiro "
+             f"tipo={tipo_lancamento} sits={situacoes} {di}→{df}")
+    data = _post(token, "/ext/relatorio/financeiro", body, timeout=(15, 60))
+    if not isinstance(data, dict):
+        log.error(f"    Resposta inesperada do POST relatório: {type(data)}")
+        return None
+    cod = data.get("codRelatorio")
+    situacao = data.get("situacao", "?")
+    mensagem = data.get("mensagem", "")
+    log.info(f"    Relatório solicitado: cod={cod}, situacao={situacao}"
+             + (f", msg={mensagem}" if mensagem else ""))
+    return cod
+
+
+def _aguardar_relatorio(token: str, cod_relatorio: int,
+                         timeout_s: int = 300) -> bool:
+    """
+    Aguarda o relatório ficar pronto via OPTIONS /ext/relatorio/financeiro/{cod}.
+
+    Faz polling com backoff exponencial (5s → 30s máx).
+    Retorna True se pronto, False se timeout.
+    """
+    inicio = time.time()
+    intervalo = 5.0
+    while time.time() - inicio < timeout_s:
+        try:
+            data = _options(token, f"/ext/relatorio/financeiro/{cod_relatorio}")
+            situacao = data.get("situacao", "Pendente") if data else "Pendente"
+            decorrido = int(time.time() - inicio)
+            log.info(f"    Relatório {cod_relatorio}: situacao={situacao} ({decorrido}s)")
+            if situacao not in ("Pendente", "Processando", "Em Processamento"):
+                return True
+        except requests.HTTPError as e:
+            log.warning(f"    HTTP {e.response.status_code} ao verificar "
+                        f"relatório {cod_relatorio}")
+        except Exception as e:
+            log.warning(f"    Erro ao verificar relatório {cod_relatorio}: {e}")
+        time.sleep(intervalo)
+        intervalo = min(intervalo * 1.5, 30.0)   # backoff gradual, máx 30 s
+
+    log.error(f"    Timeout ({timeout_s}s) aguardando relatório {cod_relatorio}")
+    return False
+
+
+def _baixar_relatorio(token: str, cod_relatorio: int) -> list[dict]:
+    """
+    Baixa o conteúdo JSON do relatório via GET /ext/relatorio/financeiro/{cod}.
+    Retorna lista de dicts com os registros de título.
+    """
+    resp = _session().get(
+        f"{SIPROV_BASE_URL}/ext/relatorio/financeiro/{cod_relatorio}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        },
+        timeout=(15, 300),
+    )
+    resp.raise_for_status()
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        log.error(f"    Relatório {cod_relatorio}: resposta não é JSON — {e}")
+        log.debug(f"    Conteúdo raw: {resp.text[:500]}")
+        return []
+
+    # A resposta pode ser: lista direta ou dict com uma chave de array
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("itens", "dados", "titulos", "registros", "content", "items"):
+            if key in data and isinstance(data[key], list):
+                log.info(f"    Relatório {cod_relatorio}: {len(data[key])} itens em '{key}'")
+                return data[key]
+        log.warning(f"    Relatório {cod_relatorio}: estrutura inesperada — "
+                    f"chaves={list(data.keys())}")
+    return []
 
 
 def coletar_titulos(token: str) -> list[dict]:
     """
-    Coleta os títulos LIQUIDADOS fatiando por mês.
-    A API tem cache: primeira chamada lenta (~50s), as seguintes (~5-7s).
+    Coleta os títulos financeiros via relatório assíncrono, fatiando por mês.
 
     Estratégia de janela:
       - Se SIPROV_DATA_INICIAL setada (YYYY-MM-DD): puxa do mês dessa data até o
         mês de SIPROV_DATA_FINAL (ou hoje+SIPROV_MESES_FUTUROS, default 6 meses).
       - Senão: puxa SIPROV_MESES_BACK meses para trás a partir de hoje (default 3).
     """
-    log.info("Coletando títulos financeiros (tipos=Crédito+Débito + situacoes=Aberto+Pendente+Liquidado)...")
+    log.info("Coletando títulos financeiros via /ext/relatorio/financeiro "
+             "(tipos=CREDITO+DEBITO, situacoes=Aberto+Pendente+Liquidado)...")
 
     hoje = date.today()
     data_ini_str = os.environ.get("SIPROV_DATA_INICIAL", "").strip()
@@ -476,32 +620,64 @@ def coletar_titulos(token: str) -> list[dict]:
         # Quantos meses simultâneos (default 4, configurável)
         max_workers = int(os.environ.get("SIPROV_PARALELISMO", "4"))
         max_workers = min(max_workers, len(meses_a_buscar))
-        # Status a coletar (Aberto + Pendente + Liquidado por padrão)
+        # Situações a coletar em cada relatório (passadas como array na API)
         situacoes = os.environ.get("SIPROV_SITUACOES", "Aberto,Pendente,Liquidado").split(",")
         situacoes = [s.strip() for s in situacoes if s.strip()]
-        # Tipos a coletar (Crédito + Débito por padrão para bater com relatório nativo)
-        tipos = os.environ.get("SIPROV_TIPOS", "Crédito,Débito").split(",")
-        tipos = [t.strip() for t in tipos if t.strip()]
-        log.info(f"  Iniciando coleta paralela de {len(meses_a_buscar)} meses x {len(situacoes)} situacoes x {len(tipos)} tipos com {max_workers} threads…")
+        # Tipos de lançamento — a API aceita "CREDITO" ou "DEBITO" (um por relatório)
+        # Mapeamento para compatibilidade com configurações antigas ("Crédito"/"Débito")
+        _tipo_map = {
+            "CREDITO": "CREDITO",
+            "CRÉDITO": "CREDITO",   # "CRÉDITO" com acento
+            "DEBITO": "DEBITO",
+            "DÉBITO": "DEBITO",     # "DÉBITO" com acento
+            "RATEIO": "RATEIO",
+        }
+        tipos_raw = os.environ.get("SIPROV_TIPOS", "CREDITO,DEBITO").split(",")
+        tipos = [
+            _tipo_map.get(t.strip().upper(), t.strip().upper())
+            for t in tipos_raw if t.strip()
+        ]
+        log.info(f"  Iniciando coleta de {len(meses_a_buscar)} meses via relatório "
+                 f"({len(tipos)} tipos × 1 req/mês) com {max_workers} threads paralelas…")
+        log.info(f"  Situações: {situacoes} | Tipos: {tipos}")
 
         def _buscar_mes(ano_mes):
             ano, mes = ano_mes
             di, df = _mes_inicio_fim(ano, mes)
-            log.info(f"  [thread] Iniciando {mes:02d}/{ano}…")
+            log.info(f"  [thread] Iniciando {mes:02d}/{ano} via relatório financeiro…")
             with lock:
-                _set(mensagem=f"Buscando títulos de {mes:02d}/{ano}…")
+                _set(mensagem=f"Solicitando relatório {mes:02d}/{ano}…")
 
             itens_mes = []
             for tipo in tipos:
-                for sit in situacoes:
-                    itens_sit = _coletar_pagina_mes(token, tipo, sit, di, df,
-                                                      total_acumulado_inicial=0)
-                    log.info(f"  [thread] {mes:02d}/{ano} {tipo}/{sit}: {len(itens_sit)}")
-                    itens_mes.extend(itens_sit)
+                try:
+                    # 1. Solicita geração do relatório
+                    cod_rel = _solicitar_relatorio(token, tipo, situacoes, di, df)
+                    if not cod_rel:
+                        log.error(f"    Sem codRelatorio para {tipo} {mes:02d}/{ano}")
+                        continue
+
+                    # 2. Aguarda processamento
+                    with lock:
+                        _set(mensagem=f"Aguardando relatório {tipo} {mes:02d}/{ano}…")
+                    if not _aguardar_relatorio(token, cod_rel, timeout_s=300):
+                        log.error(f"    Timeout no relatório {cod_rel} "
+                                  f"({tipo} {mes:02d}/{ano})")
+                        continue
+
+                    # 3. Baixa o JSON com os registros
+                    itens = _baixar_relatorio(token, cod_rel)
+                    log.info(f"  [thread] {mes:02d}/{ano} {tipo}: {len(itens)} itens")
+                    itens_mes.extend(itens)
+
+                except requests.HTTPError as e:
+                    log.error(f"    Erro HTTP {tipo} {mes:02d}/{ano}: {e}")
+                except Exception as e:
+                    log.error(f"    Erro {tipo} {mes:02d}/{ano}: {e}", exc_info=True)
 
             log.info(f"  [thread] {mes:02d}/{ano} TOTAL: {len(itens_mes)} títulos")
 
-            # Salva imediatamente no cache
+            # Salva imediatamente no cache do mês
             cache_file = cache_dir / f"{ano}_{mes:02d}.json"
             try:
                 tmp = cache_file.with_suffix(".json.tmp")
@@ -509,13 +685,13 @@ def coletar_titulos(token: str) -> list[dict]:
                     json.dump(itens_mes, f, ensure_ascii=False)
                 tmp.replace(cache_file)
             except Exception as e:
-                log.warning(f"  Falha ao salvar cache de {mes:02d}/{ano}: {e}")
+                log.warning(f"  Falha ao salvar cache {mes:02d}/{ano}: {e}")
 
             with lock:
                 todos.extend(itens_mes)
                 _set(titulos_atual=len(todos))
 
-            # LIVE UPDATE: atualiza o JSON do dashboard com o que tem até agora
+            # LIVE UPDATE: atualiza o JSON do dashboard com o progresso atual
             try:
                 _atualizar_dashboard_live(todos, {}, lock)
             except Exception as e:
@@ -532,7 +708,7 @@ def coletar_titulos(token: str) -> list[dict]:
                 except Exception as e:
                     log.error(f"  Falha em thread de mês: {e}")
 
-    log.info(f"TOTAL: {len(todos)} títulos liquidados coletados")
+    log.info(f"TOTAL: {len(todos)} títulos coletados (todos os tipos e situações)")
     _set(titulos_total=len(todos))
     return todos
 
