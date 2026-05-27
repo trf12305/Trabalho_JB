@@ -693,7 +693,6 @@ let pontualidadePct   = 0;
 let kpiAvancado = null;
 let aging = { d30: 0, d60: 0, d90: 0, d180: 0 };
 let comparativoMensal = null;
-
 let filtroTipo        = 'vencimento';
 let filtroDataInicial = null;
 let filtroDataFinal   = null;
@@ -708,11 +707,6 @@ let graficoPlanos          = { labels: [], valores: [] };
 let graficoRepresentantes  = { labels: [], valores: [] };
 
 let tabelaOperacional = [];
-
-// =========================================================
-// UTILITÁRIOS
-// =========================================================
-
 function fmtBRL(valor) {
     return new Intl.NumberFormat('pt-BR', {
         style: 'currency',

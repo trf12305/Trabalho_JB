@@ -46,7 +46,7 @@ SIPROV_DATA_INICIAL = os.environ.get("SIPROV_DATA_INICIAL", "")
 # Layout 496 = "dashboard financeiro" — campos idênticos ao formato do dashboard.
 # Os dados retornados pelo relatório não precisam de conversão adicional.
 SIPROV_COD_LAYOUT   = int(os.environ.get("SIPROV_COD_LAYOUT", "496"))
-HORARIOS            = ["06:00", "18:00"]
+HORARIOS            = ["09:00", "18:00"]
 
 BASE_DIR  = Path(__file__).parent
 DATA_DIR  = BASE_DIR / "data"

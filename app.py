@@ -1234,11 +1234,11 @@ def _iniciar_scheduler():
         return
 
     scheduler = BackgroundScheduler(daemon=True, timezone='America/Recife')
-    # Sync de hora em hora (cada sync leva ~17min; sobra tempo entre execuções)
-    scheduler.add_job(_executar_sync, 'cron', minute=0, id='sync_horario')
+    # Sync às 09:00 e 18:00 (America/Recife)
+    scheduler.add_job(_executar_sync, 'cron', hour='9,18', minute=0, id='sync_horario')
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info('[SIPROV] Scheduler iniciado -- sync de hora em hora (America/Recife)')
+    logger.info('[SIPROV] Scheduler iniciado -- sync 09:00 e 18:00 (America/Recife)')
 
     # Startup sync: dispara em background se não há arquivo recente (< 1h)
     padrao = os.path.join(BASE_DIR, 'data', 'dashboard_financeiro_*.json')
