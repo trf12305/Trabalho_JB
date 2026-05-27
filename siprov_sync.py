@@ -617,8 +617,10 @@ def coletar_titulos(token: str) -> list[dict]:
     if meses_a_buscar:
         # Lock para proteger 'todos' e progresso
         lock = threading.Lock()
-        # Situações — a API exige MAIÚSCULO. Layout 496 suporta ABERTO e LIQUIDADO.
-        situacoes = os.environ.get("SIPROV_SITUACOES", "ABERTO,LIQUIDADO").split(",")
+        # Situações — a API exige MAIÚSCULO.
+        # ABERTO=em aberto, PENDENTE=vencido não pago, LIQUIDADO=pago.
+        # Com filtro por dataVencimento, as 3 situações cobrem TODO o universo do período.
+        situacoes = os.environ.get("SIPROV_SITUACOES", "ABERTO,PENDENTE,LIQUIDADO").split(",")
         situacoes = [s.strip().upper() for s in situacoes if s.strip()]
         # Tipos de lançamento — a API aceita "CREDITO" ou "DEBITO" (um por relatório)
         # Mapeamento para compatibilidade com configurações antigas ("Crédito"/"Débito")
