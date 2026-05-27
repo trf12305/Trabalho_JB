@@ -43,6 +43,9 @@ SIPROV_USUARIO      = os.environ.get("SIPROV_USUARIO", "ti@jbclube.com")
 SIPROV_SENHA        = os.environ.get("SIPROV_SENHA",   "Melo3209.")
 SIPROV_COD_LOJA     = os.environ.get("SIPROV_COD_LOJA", "")
 SIPROV_DATA_INICIAL = os.environ.get("SIPROV_DATA_INICIAL", "")
+# Layout 496 = "dashboard financeiro" — campos idênticos ao formato do dashboard.
+# Os dados retornados pelo relatório não precisam de conversão adicional.
+SIPROV_COD_LAYOUT   = int(os.environ.get("SIPROV_COD_LAYOUT", "496"))
 HORARIOS            = ["06:00", "18:00"]
 
 BASE_DIR  = Path(__file__).parent
@@ -390,31 +393,22 @@ def _mes_inicio_fim(ano: int, mes: int) -> tuple[str, str]:
     return f"01/{mes:02d}/{ano}", f"{ultimo_dia:02d}/{mes:02d}/{ano}"
 
 
-def _atualizar_dashboard_live(titulos_brutos: list, mapa_assoc: dict, lock=None) -> None:
+def _atualizar_dashboard_live(registros: list, _ignorado=None, lock=None) -> None:
     """
-    Converte títulos brutos -> formato dashboard e salva em data/dashboard_financeiro_live.json.
-    Chamado após cada mês completar — assim o dashboard reflete o progresso em tempo real.
-    """
-    if lock is not None:
-        snapshot = list(titulos_brutos)  # snapshot rápido sob o lock
-    else:
-        snapshot = titulos_brutos
+    Salva os registros em data/dashboard_financeiro_live.json.
 
-    registros = []
-    for t in snapshot:
-        cod = str(t.get("codPessoa") or "")
-        assoc = mapa_assoc.get(cod) if mapa_assoc else {}
-        try:
-            registros.append(titulo_para_registro(t, assoc or {}))
-        except Exception:
-            pass
+    Com o layout 496 os dados já chegam no formato do dashboard —
+    não é necessária conversão adicional.
+    Chamado após cada mês completar para atualização em tempo real.
+    """
+    snapshot = list(registros) if lock is not None else registros
 
     arquivo = DATA_DIR / "dashboard_financeiro_live.json"
     tmp = arquivo.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(registros, f, ensure_ascii=False)
+        json.dump(snapshot, f, ensure_ascii=False)
     tmp.replace(arquivo)
-    log.info(f"  [LIVE] {len(registros)} registros disponíveis no dashboard")
+    log.info(f"  [LIVE] {len(snapshot)} registros disponíveis no dashboard")
 
 
 def _solicitar_relatorio(token: str, tipo_lancamento: str,
@@ -430,9 +424,11 @@ def _solicitar_relatorio(token: str, tipo_lancamento: str,
     Retorna codRelatorio (int) ou None se a API não retornar o código.
     """
     body: dict = {
-        "formato": "JSON",
-        "tipoLancamento": tipo_lancamento.upper(),
-        "situacaoTitulo": situacoes,
+        "codLayout":             SIPROV_COD_LAYOUT,
+        "formato":               "JSON",
+        "tipoLancamento":        tipo_lancamento.upper(),
+        # A API exige situações em MAIÚSCULO: "ABERTO", "LIQUIDADO"
+        "situacaoTitulo":        [s.upper() for s in situacoes],
         "dataVencimentoInicial": di,
         "dataVencimentoFinal":   df,
     }
@@ -457,23 +453,27 @@ def _solicitar_relatorio(token: str, tipo_lancamento: str,
 
 
 def _aguardar_relatorio(token: str, cod_relatorio: int,
-                         timeout_s: int = 300) -> bool:
+                         timeout_s: int = 1200) -> bool:
     """
     Aguarda o relatório ficar pronto via OPTIONS /ext/relatorio/financeiro/{cod}.
 
     Faz polling com backoff exponencial (5s → 30s máx).
     Retorna True se pronto, False se timeout.
     """
+    # Estados que indicam "ainda processando" — a API retorna em MAIÚSCULO
+    _PENDENTES = {"PENDENTE", "PROCESSANDO", "EM PROCESSAMENTO"}
+
     inicio = time.time()
     intervalo = 5.0
     while time.time() - inicio < timeout_s:
         try:
             data = _options(token, f"/ext/relatorio/financeiro/{cod_relatorio}")
-            situacao = data.get("situacao", "Pendente") if data else "Pendente"
+            situacao = (data.get("situacao", "PENDENTE") if data else "PENDENTE").upper()
             decorrido = int(time.time() - inicio)
             log.info(f"    Relatório {cod_relatorio}: situacao={situacao} ({decorrido}s)")
-            if situacao not in ("Pendente", "Processando", "Em Processamento"):
-                return True
+            if situacao not in _PENDENTES:
+                # FINALIZADO, ERRO, ou qualquer outro estado terminal
+                return situacao == "FINALIZADO"
         except requests.HTTPError as e:
             log.warning(f"    HTTP {e.response.status_code} ao verificar "
                         f"relatório {cod_relatorio}")
@@ -617,12 +617,9 @@ def coletar_titulos(token: str) -> list[dict]:
     if meses_a_buscar:
         # Lock para proteger 'todos' e progresso
         lock = threading.Lock()
-        # Quantos meses simultâneos (default 4, configurável)
-        max_workers = int(os.environ.get("SIPROV_PARALELISMO", "4"))
-        max_workers = min(max_workers, len(meses_a_buscar))
-        # Situações a coletar em cada relatório (passadas como array na API)
-        situacoes = os.environ.get("SIPROV_SITUACOES", "Aberto,Pendente,Liquidado").split(",")
-        situacoes = [s.strip() for s in situacoes if s.strip()]
+        # Situações — a API exige MAIÚSCULO. Layout 496 suporta ABERTO e LIQUIDADO.
+        situacoes = os.environ.get("SIPROV_SITUACOES", "ABERTO,LIQUIDADO").split(",")
+        situacoes = [s.strip().upper() for s in situacoes if s.strip()]
         # Tipos de lançamento — a API aceita "CREDITO" ou "DEBITO" (um por relatório)
         # Mapeamento para compatibilidade com configurações antigas ("Crédito"/"Débito")
         _tipo_map = {
@@ -637,76 +634,95 @@ def coletar_titulos(token: str) -> list[dict]:
             _tipo_map.get(t.strip().upper(), t.strip().upper())
             for t in tipos_raw if t.strip()
         ]
-        log.info(f"  Iniciando coleta de {len(meses_a_buscar)} meses via relatório "
-                 f"({len(tipos)} tipos × 1 req/mês) com {max_workers} threads paralelas…")
         log.info(f"  Situações: {situacoes} | Tipos: {tipos}")
+        log.info(f"  Estratégia: solicitar {len(meses_a_buscar)*len(tipos)} relatórios "
+                 f"de uma vez, depois aguardar e baixar em paralelo.")
 
-        def _buscar_mes(ano_mes):
-            ano, mes = ano_mes
+        # ── Fase 2a: solicita TODOS os relatórios de uma vez ──────────────────
+        # Chave: (ano, mes, tipo)  →  codRelatorio
+        fila: dict[tuple, int] = {}
+        for ano, mes in meses_a_buscar:
             di, df = _mes_inicio_fim(ano, mes)
-            log.info(f"  [thread] Iniciando {mes:02d}/{ano} via relatório financeiro…")
-            with lock:
-                _set(mensagem=f"Solicitando relatório {mes:02d}/{ano}…")
-
-            itens_mes = []
             for tipo in tipos:
                 try:
-                    # 1. Solicita geração do relatório
-                    cod_rel = _solicitar_relatorio(token, tipo, situacoes, di, df)
-                    if not cod_rel:
-                        log.error(f"    Sem codRelatorio para {tipo} {mes:02d}/{ano}")
-                        continue
-
-                    # 2. Aguarda processamento
-                    with lock:
-                        _set(mensagem=f"Aguardando relatório {tipo} {mes:02d}/{ano}…")
-                    if not _aguardar_relatorio(token, cod_rel, timeout_s=300):
-                        log.error(f"    Timeout no relatório {cod_rel} "
-                                  f"({tipo} {mes:02d}/{ano})")
-                        continue
-
-                    # 3. Baixa o JSON com os registros
-                    itens = _baixar_relatorio(token, cod_rel)
-                    log.info(f"  [thread] {mes:02d}/{ano} {tipo}: {len(itens)} itens")
-                    itens_mes.extend(itens)
-
-                except requests.HTTPError as e:
-                    log.error(f"    Erro HTTP {tipo} {mes:02d}/{ano}: {e}")
+                    cod = _solicitar_relatorio(token, tipo, situacoes, di, df)
+                    if cod:
+                        fila[(ano, mes, tipo)] = cod
+                        log.info(f"  Solicitado: {mes:02d}/{ano} {tipo} → cod={cod}")
+                    else:
+                        log.error(f"  Sem codRelatorio para {tipo} {mes:02d}/{ano}")
                 except Exception as e:
-                    log.error(f"    Erro {tipo} {mes:02d}/{ano}: {e}", exc_info=True)
+                    log.error(f"  Erro ao solicitar {tipo} {mes:02d}/{ano}: {e}")
 
-            log.info(f"  [thread] {mes:02d}/{ano} TOTAL: {len(itens_mes)} títulos")
+        log.info(f"  {len(fila)} relatórios solicitados. Aguardando conclusão…")
+        _set(mensagem=f"Aguardando {len(fila)} relatórios do Siprov…")
 
-            # Salva imediatamente no cache do mês
-            cache_file = cache_dir / f"{ano}_{mes:02d}.json"
-            try:
-                tmp = cache_file.with_suffix(".json.tmp")
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(itens_mes, f, ensure_ascii=False)
-                tmp.replace(cache_file)
-            except Exception as e:
-                log.warning(f"  Falha ao salvar cache {mes:02d}/{ano}: {e}")
+        # ── Fase 2b: polling paralelo de todos até ficarem prontos ───────────
+        # Timeout global: 30 min. Intervalo de poll: 15 s.
+        TIMEOUT_GLOBAL = int(os.environ.get("SIPROV_TIMEOUT_RELATORIO", "1800"))
+        pendentes: dict[tuple, int] = dict(fila)  # cópia mutável
+        concluidos: dict[tuple, list] = {}         # (ano,mes,tipo) → itens
+        t_inicio = time.time()
 
-            with lock:
-                todos.extend(itens_mes)
-                _set(titulos_atual=len(todos))
-
-            # LIVE UPDATE: atualiza o JSON do dashboard com o progresso atual
-            try:
-                _atualizar_dashboard_live(todos, {}, lock)
-            except Exception as e:
-                log.warning(f"  Falha no live update após {mes:02d}/{ano}: {e}")
-
-            return (ano, mes, len(itens_mes))
-
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = [pool.submit(_buscar_mes, ym) for ym in meses_a_buscar]
-            for fut in as_completed(futures):
+        while pendentes and (time.time() - t_inicio) < TIMEOUT_GLOBAL:
+            prontos_agora = []
+            for chave, cod in list(pendentes.items()):
                 try:
-                    ano, mes, n = fut.result()
-                    log.info(f"  ✓ {mes:02d}/{ano} completo: {n} títulos (acum {len(todos)})")
+                    data = _options(token, f"/ext/relatorio/financeiro/{cod}")
+                    sit = (data.get("situacao", "PENDENTE") if data
+                           else "PENDENTE").upper()
+                    decorrido = int(time.time() - t_inicio)
+                    ano, mes, tipo = chave
+                    log.info(f"  [{decorrido}s] {mes:02d}/{ano} {tipo} cod={cod}: {sit}")
+                    if sit not in ("PENDENTE", "PROCESSANDO", "EM PROCESSAMENTO"):
+                        prontos_agora.append((chave, cod, sit))
                 except Exception as e:
-                    log.error(f"  Falha em thread de mês: {e}")
+                    log.warning(f"  Erro ao verificar cod={cod}: {e}")
+
+            for chave, cod, sit in prontos_agora:
+                pendentes.pop(chave)
+                ano, mes, tipo = chave
+                if sit == "FINALIZADO":
+                    try:
+                        itens = _baixar_relatorio(token, cod)
+                        log.info(f"  Baixado {mes:02d}/{ano} {tipo}: {len(itens)} itens")
+                        concluidos[chave] = itens
+
+                        # Salva no cache do mês (agrega CREDITO+DEBITO)
+                        cache_file = cache_dir / f"{ano}_{mes:02d}.json"
+                        # Junta com dados de outro tipo do mesmo mês, se já existe
+                        existentes: list = []
+                        if cache_file.exists():
+                            try:
+                                with open(cache_file, encoding="utf-8") as f:
+                                    existentes = json.load(f)
+                            except Exception:
+                                existentes = []
+                        merged = existentes + itens
+                        tmp = cache_file.with_suffix(".json.tmp")
+                        with open(tmp, "w", encoding="utf-8") as f:
+                            json.dump(merged, f, ensure_ascii=False)
+                        tmp.replace(cache_file)
+
+                        # Live update acumulado
+                        with lock:
+                            todos.extend(itens)
+                            _set(titulos_atual=len(todos),
+                                 mensagem=f"{len(todos)} títulos (baixando…)")
+                        _atualizar_dashboard_live(todos, None, lock)
+                    except Exception as e:
+                        log.error(f"  Erro ao baixar {mes:02d}/{ano} {tipo}: {e}")
+                else:
+                    log.warning(f"  Relatório {cod} encerrou com situacao={sit} — ignorado")
+
+            if pendentes:
+                time.sleep(15)  # aguarda 15 s antes do próximo round de polling
+
+        if pendentes:
+            for chave, cod in pendentes.items():
+                ano, mes, tipo = chave
+                log.error(f"  Timeout global ({TIMEOUT_GLOBAL}s): "
+                          f"{mes:02d}/{ano} {tipo} cod={cod} nunca finalizou")
 
     log.info(f"TOTAL: {len(todos)} títulos coletados (todos os tipos e situações)")
     _set(titulos_total=len(todos))
@@ -793,29 +809,16 @@ def sincronizar():
              concluido_em=datetime.now().isoformat())
         return
 
+    # O layout 496 já devolve os dados no formato do dashboard —
+    # não é necessário buscar associados nem converter registros.
+    log.info(f"Salvando {len(titulos)} registros (dados já no formato do dashboard)...")
+    _set(status="salvando", mensagem="Salvando registros…")
     try:
-        _set(status="associados", mensagem="Coletando associados…")
-        mapa_assoc = coletar_associados(token)
-    except Exception as e:
-        log.warning(f"Falha ao coletar associados (continuando sem enriquecimento): {e}")
-        mapa_assoc = {}
-
-    log.info("Convertendo registros (com enriquecimento de associados)...")
-    _set(status="salvando", mensagem="Convertendo com enriquecimento…")
-    # Atualiza o LIVE agora com associados (versão final enriquecida)
-    try:
-        _atualizar_dashboard_live(titulos, mapa_assoc, None)
+        _atualizar_dashboard_live(titulos, None, None)
     except Exception as e:
         log.warning(f"Falha no live update final: {e}")
 
-    registros = []
-    for t in titulos:
-        cod = str(t.get("codPessoa") or "")
-        assoc = mapa_assoc.get(cod) or {}
-        try:
-            registros.append(titulo_para_registro(t, assoc))
-        except Exception as e:
-            log.warning(f"Erro ao converter título {t.get('codTitulo')}: {e}")
+    registros = titulos  # uso direto, sem conversão
 
     # Salva
     ts = inicio.strftime("%Y%m%d_%H%M%S")
