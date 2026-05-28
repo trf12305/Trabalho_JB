@@ -327,12 +327,20 @@ def titulo_para_registro(titulo: dict, associado: dict = None) -> dict:
         desconto    = _float(liq.get("desconto", 0))
         usuario_liq = _safe(liq.get("nomeLiquidante"))
 
+    # Consultor e Representante — TituloOutputTO (layout 496): beneficios[].nomeConsultor/.nomeRepresentante
+    consultor     = ""
+    representante = ""
+    bens_obj = titulo.get("beneficios") or []
+    if bens_obj and isinstance(bens_obj[0], dict):
+        consultor     = _safe(bens_obj[0].get("nomeConsultor"))
+        representante = _safe(bens_obj[0].get("nomeRepresentante"))
+
     return {
         # ── Benefício ──────────────────────────────────────
         "beneficio_sequencial":          beneficio_seq,
         "beneficio_data_adesao":         _data(_safe(a.get("dataAdesao"))),
-        "beneficio_consultor":           "",
-        "beneficio_representante":       "",
+        "beneficio_consultor":           consultor,
+        "beneficio_representante":       representante,
         "beneficio_valor_mensalidade":   mensalidade,
         "beneficio_planos_principais":   plano_principal,
 
@@ -411,27 +419,40 @@ def _atualizar_dashboard_live(registros: list, _ignorado=None, lock=None) -> Non
     log.info(f"  [LIVE] {len(snapshot)} registros disponíveis no dashboard")
 
 
+def _dedup_key(item: dict) -> str:
+    """Chave única de um título para deduplicação entre filtros vencimento+liquidacao."""
+    return str(item.get("codTitulo") or item.get("titulo_parcela") or id(item))
+
+
 def _solicitar_relatorio(token: str, tipo_lancamento: str,
-                          situacoes: list[str], di: str, df: str) -> int | None:
+                          situacoes: list[str], di: str, df: str,
+                          filtro_data: str = "vencimento") -> int | None:
     """
     Solicita a geração assíncrona de um relatório financeiro.
 
     Args:
         tipo_lancamento: "CREDITO" ou "DEBITO"
-        situacoes: lista de situações, ex. ["Aberto", "Pendente", "Liquidado"]
-        di, df: datas no formato dd/MM/yyyy (início e fim do vencimento)
+        situacoes: lista de situações, ex. ["ABERTO", "LIQUIDADO"]
+        di, df: datas no formato dd/MM/yyyy (início e fim)
+        filtro_data: "vencimento" (dataVencimento) ou "liquidacao" (dataLiquidacao)
 
     Retorna codRelatorio (int) ou None se a API não retornar o código.
     """
     body: dict = {
-        "codLayout":             SIPROV_COD_LAYOUT,
-        "formato":               "JSON",
-        "tipoLancamento":        tipo_lancamento.upper(),
+        "codLayout":      SIPROV_COD_LAYOUT,
+        "formato":        "JSON",
+        "tipoLancamento": tipo_lancamento.upper(),
         # A API exige situações em MAIÚSCULO: "ABERTO", "LIQUIDADO"
-        "situacaoTitulo":        [s.upper() for s in situacoes],
-        "dataVencimentoInicial": di,
-        "dataVencimentoFinal":   df,
+        "situacaoTitulo": [s.upper() for s in situacoes],
     }
+    # Fusão vencimento + liquidacao: cada relatório usa apenas UM tipo de data.
+    if filtro_data == "liquidacao":
+        body["dataLiquidacaoInicial"] = di
+        body["dataLiquidacaoFinal"]   = df
+    else:
+        body["dataVencimentoInicial"] = di
+        body["dataVencimentoFinal"]   = df
+
     if SIPROV_COD_LOJA:
         try:
             body["codLoja"] = [int(SIPROV_COD_LOJA)]
@@ -439,7 +460,7 @@ def _solicitar_relatorio(token: str, tipo_lancamento: str,
             body["codLoja"] = [SIPROV_COD_LOJA]
 
     log.info(f"    POST /ext/relatorio/financeiro "
-             f"tipo={tipo_lancamento} sits={situacoes} {di}→{df}")
+             f"tipo={tipo_lancamento} filtro={filtro_data} sits={situacoes} {di}→{df}")
     data = _post(token, "/ext/relatorio/financeiro", body, timeout=(15, 60))
     if not isinstance(data, dict):
         log.error(f"    Resposta inesperada do POST relatório: {type(data)}")
@@ -641,20 +662,25 @@ def coletar_titulos(token: str) -> list[dict]:
                  f"de uma vez, depois aguardar e baixar em paralelo.")
 
         # ── Fase 2a: solicita TODOS os relatórios de uma vez ──────────────────
-        # Chave: (ano, mes, tipo)  →  codRelatorio
+        # Fusão vencimento + liquidacao: para cada mês/tipo, 2 relatórios são solicitados.
+        # Assim capturamos tanto quem pagou antecipado (vencimento no período, liquidacao antes)
+        # quanto quem pagou atrasado (vencimento antes do período, liquidacao no período).
+        # Chave: (ano, mes, tipo, filtro_data)  →  codRelatorio
+        filtros_data = ["vencimento"]  # fusão com liquidacao desativada por ora
         fila: dict[tuple, int] = {}
         for ano, mes in meses_a_buscar:
             di, df = _mes_inicio_fim(ano, mes)
             for tipo in tipos:
-                try:
-                    cod = _solicitar_relatorio(token, tipo, situacoes, di, df)
-                    if cod:
-                        fila[(ano, mes, tipo)] = cod
-                        log.info(f"  Solicitado: {mes:02d}/{ano} {tipo} → cod={cod}")
-                    else:
-                        log.error(f"  Sem codRelatorio para {tipo} {mes:02d}/{ano}")
-                except Exception as e:
-                    log.error(f"  Erro ao solicitar {tipo} {mes:02d}/{ano}: {e}")
+                for filtro_data in filtros_data:
+                    try:
+                        cod = _solicitar_relatorio(token, tipo, situacoes, di, df, filtro_data)
+                        if cod:
+                            fila[(ano, mes, tipo, filtro_data)] = cod
+                            log.info(f"  Solicitado: {mes:02d}/{ano} {tipo}/{filtro_data} → cod={cod}")
+                        else:
+                            log.error(f"  Sem codRelatorio para {tipo}/{filtro_data} {mes:02d}/{ano}")
+                    except Exception as e:
+                        log.error(f"  Erro ao solicitar {tipo}/{filtro_data} {mes:02d}/{ano}: {e}")
 
         log.info(f"  {len(fila)} relatórios solicitados. Aguardando conclusão…")
         _set(mensagem=f"Aguardando {len(fila)} relatórios do Siprov…")
@@ -663,7 +689,7 @@ def coletar_titulos(token: str) -> list[dict]:
         # Timeout global: 30 min. Intervalo de poll: 15 s.
         TIMEOUT_GLOBAL = int(os.environ.get("SIPROV_TIMEOUT_RELATORIO", "1800"))
         pendentes: dict[tuple, int] = dict(fila)  # cópia mutável
-        concluidos: dict[tuple, list] = {}         # (ano,mes,tipo) → itens
+        concluidos: dict[tuple, list] = {}         # (ano,mes,tipo,filtro_data) → itens
         t_inicio = time.time()
 
         while pendentes and (time.time() - t_inicio) < TIMEOUT_GLOBAL:
@@ -674,8 +700,8 @@ def coletar_titulos(token: str) -> list[dict]:
                     sit = (data.get("situacao", "PENDENTE") if data
                            else "PENDENTE").upper()
                     decorrido = int(time.time() - t_inicio)
-                    ano, mes, tipo = chave
-                    log.info(f"  [{decorrido}s] {mes:02d}/{ano} {tipo} cod={cod}: {sit}")
+                    ano, mes, tipo, filtro_data = chave
+                    log.info(f"  [{decorrido}s] {mes:02d}/{ano} {tipo}/{filtro_data} cod={cod}: {sit}")
                     if sit not in ("PENDENTE", "PROCESSANDO", "EM PROCESSAMENTO"):
                         prontos_agora.append((chave, cod, sit))
                 except Exception as e:
@@ -683,16 +709,15 @@ def coletar_titulos(token: str) -> list[dict]:
 
             for chave, cod, sit in prontos_agora:
                 pendentes.pop(chave)
-                ano, mes, tipo = chave
+                ano, mes, tipo, filtro_data = chave
                 if sit == "FINALIZADO":
                     try:
                         itens = _baixar_relatorio(token, cod)
-                        log.info(f"  Baixado {mes:02d}/{ano} {tipo}: {len(itens)} itens")
+                        log.info(f"  Baixado {mes:02d}/{ano} {tipo}/{filtro_data}: {len(itens)} itens")
                         concluidos[chave] = itens
 
-                        # Salva no cache do mês (agrega CREDITO+DEBITO)
+                        # Salva no cache do mês — deduplica por codTitulo antes de gravar
                         cache_file = cache_dir / f"{ano}_{mes:02d}.json"
-                        # Junta com dados de outro tipo do mesmo mês, se já existe
                         existentes: list = []
                         if cache_file.exists():
                             try:
@@ -700,20 +725,24 @@ def coletar_titulos(token: str) -> list[dict]:
                                     existentes = json.load(f)
                             except Exception:
                                 existentes = []
-                        merged = existentes + itens
+                        # Deduplicação: vencimento + liquidacao podem retornar o mesmo título
+                        _vistos: dict = {_dedup_key(r): r for r in existentes}
+                        for item in itens:
+                            _vistos.setdefault(_dedup_key(item), item)
+                        merged = list(_vistos.values())
                         tmp = cache_file.with_suffix(".json.tmp")
                         with open(tmp, "w", encoding="utf-8") as f:
                             json.dump(merged, f, ensure_ascii=False)
                         tmp.replace(cache_file)
 
-                        # Live update acumulado
+                        # Live update acumulado (dedup será feito ao final)
                         with lock:
                             todos.extend(itens)
                             _set(titulos_atual=len(todos),
                                  mensagem=f"{len(todos)} títulos (baixando…)")
                         _atualizar_dashboard_live(todos, None, lock)
                     except Exception as e:
-                        log.error(f"  Erro ao baixar {mes:02d}/{ano} {tipo}: {e}")
+                        log.error(f"  Erro ao baixar {mes:02d}/{ano} {tipo}/{filtro_data}: {e}")
                 else:
                     log.warning(f"  Relatório {cod} encerrou com situacao={sit} — ignorado")
 
@@ -722,11 +751,22 @@ def coletar_titulos(token: str) -> list[dict]:
 
         if pendentes:
             for chave, cod in pendentes.items():
-                ano, mes, tipo = chave
+                ano, mes, tipo, filtro_data = chave
                 log.error(f"  Timeout global ({TIMEOUT_GLOBAL}s): "
-                          f"{mes:02d}/{ano} {tipo} cod={cod} nunca finalizou")
+                          f"{mes:02d}/{ano} {tipo}/{filtro_data} cod={cod} nunca finalizou")
 
-    log.info(f"TOTAL: {len(todos)} títulos coletados (todos os tipos e situações)")
+    # Deduplicação final: fusão vencimento+liquidacao pode duplicar títulos pagos no prazo
+    if todos:
+        _vistos_final: dict = {}
+        for item in todos:
+            _vistos_final.setdefault(_dedup_key(item), item)
+        n_antes = len(todos)
+        todos = list(_vistos_final.values())
+        n_dup = n_antes - len(todos)
+        if n_dup:
+            log.info(f"  Deduplicação final: {n_dup} registros removidos (mesmo codTitulo em vencimento+liquidacao)")
+
+    log.info(f"TOTAL: {len(todos)} títulos coletados (após deduplicação)")
     _set(titulos_total=len(todos))
     return todos
 

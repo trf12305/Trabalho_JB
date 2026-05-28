@@ -50,3 +50,9 @@ cookies.txt
 
 # Claude Code
 .claude/
+
+# Node (dependência só para gerar o relatório .docx)
+node_modules/
+
+# Scripts auxiliares (geradores de relatorio/apresentacao)
+_open.py

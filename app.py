@@ -163,17 +163,18 @@ def carregar_dados_json():
 # =========================================================
 
 def _dedup_raw(dados):
-    vistos = set()
-    unicos = []
-    for item in dados:
-        bid  = str(item.get('beneficio_sequencial') or '').strip()
-        parc = str(item.get('titulo_parcela')        or '').strip()
-        chave = (bid, parc)
-        if chave in vistos:
-            continue
-        vistos.add(chave)
-        unicos.append(item)
-    return unicos
+    """
+    Dedup desativado — o Siprov é a fonte de verdade e seus totais
+    consideram TODOS os registros do export, incluindo casos que
+    parecem duplicatas (mesmo título com 2 liquidações idênticas,
+    pagamentos parciais, estornos+repagos, etc.). Aplicar dedup aqui
+    fazia o dashboard divergir dos relatórios oficiais do Siprov.
+
+    Mantida a função (em vez de removida) para preservar a interface
+    com processar_dados_para_dash() e facilitar reativação futura
+    caso seja necessário (basta restaurar a lógica anterior).
+    """
+    return dados
 
 
 # =========================================================
@@ -231,11 +232,17 @@ def filtrar_dados(dados, tipo='vencimento', data_inicial=None,data_final=None, b
     filtrado = []
 
     for item in dados:
-        data_str = (
-            item.get('data_vencimento')
-            if tipo == 'vencimento'
-            else item.get('data_liquidacao')
-        )
+        if tipo == 'vencimento':
+            data_str = item.get('data_vencimento')
+        else:
+            # Modo liquidação: usa data_liquidacao; se ausente em título
+            # LIQUIDADO, cai para data_vencimento pra não perder o título
+            # (casos raros de export Siprov com situação=LIQUIDADO sem data_liq).
+            data_str = item.get('data_liquidacao') or (
+                item.get('data_vencimento')
+                if item.get('situacao', '') in SITUACOES_LIQUIDACAO
+                else None
+            )
         if not data_str:
             continue
         data_ref = parse_date(data_str)
@@ -298,19 +305,11 @@ def _fluxo_mensal(dados, campo_data, campo_valor):
 # =========================================================
 
 def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
-    ids_unicos = set()
-    sem_id = 0
-
-    for d in dados:
-        if tipo_filtro == 'liquidacao' and to_float(d.get('valor_liquidado', 0)) <= 0:
-            continue
-        bid = d.get('beneficio_sequencial', '').strip()
-        if bid:
-            ids_unicos.add(bid)
-        else:
-            sem_id += 1
-
-    total_registros = len(ids_unicos) + sem_id
+    # Total de títulos = contagem direta de linhas (1 título = 1 registro),
+    # batendo 1:1 com a contagem do Excel/JSON exportado do Siprov.
+    # Antes deduplicava por beneficio_sequencial, o que subcontava títulos
+    # quando o mesmo associado tinha múltiplas parcelas no mesmo período.
+    total_registros = len(dados)
 
     total_face = round(
         sum(
@@ -487,6 +486,31 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
     if len(cm_labels) >= 13 and cm_liquidado[-13] > 0:
         yoy = round((cm_liquidado[-1] / cm_liquidado[-13] - 1) * 100, 1)
 
+    # =====================================================
+    # AUDITORIA — Inconsistências do Siprov
+    # =====================================================
+    # Títulos marcados LIQUIDADO mas sem dados de liquidação
+    # (data_liquidacao OU valor_liquidado ausentes). Sinaliza
+    # bugs de cadastro no Siprov para auditoria operacional.
+    inconsistencias_lista = []
+    for d in dados:
+        if d.get('situacao', '') in SITUACOES_LIQUIDACAO:
+            if not d.get('data_liquidacao') or to_float(d.get('valor_liquidado', 0)) <= 0:
+                inconsistencias_lista.append({
+                    'beneficio_sequencial': d.get('beneficio_sequencial', ''),
+                    'associado':            d.get('associado', ''),
+                    'parcela':              d.get('titulo_parcela', ''),
+                    'unidade':              d.get('unidade', ''),
+                    'valor_titulo':         d.get('valor_titulo', 0),
+                    'data_vencimento':      d.get('data_vencimento'),
+                    'tem_data_liq':         bool(d.get('data_liquidacao')),
+                    'tem_valor_liq':        to_float(d.get('valor_liquidado', 0)) > 0,
+                })
+    qtd_inconsistencias = len(inconsistencias_lista)
+    valor_inconsistencias = round(
+        sum(to_float(x['valor_titulo']) for x in inconsistencias_lista), 2
+    )
+
     return {
         'cards': {
             'registros':    total_registros,
@@ -505,7 +529,11 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
             'dso':          dso,
             'mom':          mom,
             'yoy':          yoy,
+            # ── Auditoria de inconsistências ──
+            'qtd_inconsistencias':    qtd_inconsistencias,
+            'valor_inconsistencias':  valor_inconsistencias,
         },
+        'inconsistencias': inconsistencias_lista[:50],  # primeiros 50 p/ tooltip/modal
         'aging': {
             'd30':  round(aging_30, 2),
             'd60':  round(aging_60, 2),
@@ -1254,14 +1282,35 @@ def _iniciar_scheduler():
     threading.Thread(target=_executar_sync, daemon=True).start()
 
 
-_iniciar_scheduler()
+# =========================================================
+# AUTO-SYNC DESATIVADO
+# =========================================================
+# O projeto está em modo "JSON fixo como fonte de verdade".
+# O arquivo em data/dashboard_financeiro_live.json é a única
+# base de dados. Para reativar a sync automática (startup +
+# cron 09:00/18:00), descomente a chamada abaixo.
+#
+# _iniciar_scheduler()
+logger.info('[SIPROV] Auto-sync DESATIVADO -- usando apenas JSON local como fonte de dados.')
 
 
 @app.route('/api/admin/sync', methods=['POST'])
 @login_required
 def api_admin_sync():
-    threading.Thread(target=_executar_sync, daemon=True).start()
-    return jsonify({'status': 'sync iniciado em background'})
+    # =========================================================
+    # MODO JSON-ONLY ATIVO
+    # =========================================================
+    # O projeto está em modo "JSON fixo como fonte de verdade".
+    # Nenhuma requisição ao Siprov será feita. Para reativar a
+    # sync manual, restaure a linha abaixo:
+    #
+    # threading.Thread(target=_executar_sync, daemon=True).start()
+    # return jsonify({'status': 'sync iniciado em background'})
+    logger.warning('[SIPROV] Tentativa de sync manual bloqueada — modo JSON-only ativo.')
+    return jsonify({
+        'status': 'bloqueado',
+        'mensagem': 'Sincronização desativada. O sistema está usando o JSON local como única fonte de dados.'
+    }), 423  # 423 Locked
 
 
 @app.route('/api/admin/sync/status')

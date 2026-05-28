@@ -360,11 +360,23 @@
         <h2 id="vendas" class="kpi-value mt-2 text-white">0</h2>
     </div>
 
-    <div class="glass kpi-card border border-orange-500/20">
+    <div class="glass kpi-card border border-orange-500/20 relative">
         <p id="titulo-liquidado" class="text-[10px] uppercase tracking-widest text-orange-400 font-bold">
             Total Liquidado
         </p>
         <h2 id="liquidado" class="kpi-value mt-2 text-orange-400">R$ 0</h2>
+        <!-- Badge de auditoria: aparece quando há títulos LIQUIDADO sem dados de liquidação -->
+        <button id="badge-inconsistencias"
+                onclick="abrirModalInconsistencias()"
+                class="hidden absolute top-2 right-2 group"
+                title="Há títulos marcados LIQUIDADO sem dados de pagamento no Siprov.">
+            <span class="flex items-center gap-1 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/50 text-yellow-300 text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full transition-all">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+                </svg>
+                <span id="badge-inconsistencias-count">0</span>
+            </span>
+        </button>
     </div>
 
     <div class="glass kpi-card border border-emerald-500/20">
@@ -689,6 +701,11 @@ let ticketMedio       = 0;
 let totalBases        = 0;
 let pontualidadePct   = 0;
 
+// Auditoria de inconsistências do Siprov
+let inconsistenciasLista  = [];
+let inconsistenciasQtd    = 0;
+let inconsistenciasValor  = 0;
+
 // KPIs avançados
 let kpiAvancado = null;
 let aging = { d30: 0, d60: 0, d90: 0, d180: 0 };
@@ -985,6 +1002,12 @@ async function carregarDados() {
         totalBases        = Number(dados.cards?.bases        ?? 0);
         pontualidadePct   = Number(dados.cards?.pontualidade ?? 0);
 
+        // Auditoria — badge de inconsistências (LIQUIDADO sem dados de pagamento)
+        inconsistenciasLista  = Array.isArray(dados.inconsistencias) ? dados.inconsistencias : [];
+        inconsistenciasQtd    = Number(dados.cards?.qtd_inconsistencias   ?? 0);
+        inconsistenciasValor  = Number(dados.cards?.valor_inconsistencias ?? 0);
+        renderBadgeInconsistencias();
+
         // KPIs avançados
         kpiAvancado = {
             a_receber:    Number(dados.cards?.a_receber       ?? 0),
@@ -1260,9 +1283,132 @@ document.addEventListener('DOMContentLoaded', () => {
 // Permite que o componente sync_siprov.js recarregue após uma sync OK
 window.recarregarDashboard = carregarDados;
 
+// =========================================================
+// AUDITORIA — Badge e modal de inconsistências
+// Aparece quando há títulos LIQUIDADO sem dados de pagamento
+// (bug de cadastro no Siprov: situação=LIQUIDADO mas data_liq
+// ou valor_liq vazios).
+// =========================================================
+
+function renderBadgeInconsistencias() {
+    const badge   = document.getElementById('badge-inconsistencias');
+    const countEl = document.getElementById('badge-inconsistencias-count');
+    if (!badge || !countEl) return;
+
+    if (inconsistenciasQtd > 0) {
+        badge.classList.remove('hidden');
+        countEl.textContent = inconsistenciasQtd.toLocaleString('pt-BR');
+        badge.title =
+            `${inconsistenciasQtd} título(s) marcado(s) LIQUIDADO no Siprov sem ` +
+            `dados de pagamento — total de face afetado: ${fmtBRL(inconsistenciasValor)}. ` +
+            `Clique para ver detalhes.`;
+    } else {
+        badge.classList.add('hidden');
+    }
+}
+
+function abrirModalInconsistencias() {
+    const modal = document.getElementById('modal-inconsistencias');
+    const tbody = document.getElementById('modal-inconsistencias-tbody');
+    const titulo = document.getElementById('modal-inconsistencias-titulo');
+    if (!modal || !tbody) return;
+
+    titulo.textContent =
+        `${inconsistenciasQtd.toLocaleString('pt-BR')} inconsistência(s) — ` +
+        `${fmtBRL(inconsistenciasValor)} em face`;
+
+    if (!inconsistenciasLista.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-500">Nenhum detalhe disponível.</td></tr>`;
+    } else {
+        tbody.innerHTML = inconsistenciasLista.map(item => {
+            const problemas = [];
+            if (!item.tem_data_liq)  problemas.push('sem data de liquidação');
+            if (!item.tem_valor_liq) problemas.push('sem valor recebido');
+            return `
+                <tr class="border-b border-white/5 hover:bg-white/5">
+                    <td class="py-2 px-3 text-xs text-slate-300">${item.beneficio_sequencial || '-'}</td>
+                    <td class="py-2 px-3 text-xs text-white">${item.associado || '-'}</td>
+                    <td class="py-2 px-3 text-xs text-slate-300">${item.parcela || '-'}</td>
+                    <td class="py-2 px-3 text-xs text-slate-400">${item.unidade || '-'}</td>
+                    <td class="py-2 px-3 text-xs text-emerald-400 font-semibold">${fmtBRL(Number(item.valor_titulo || 0))}</td>
+                    <td class="py-2 px-3 text-xs text-yellow-300">${problemas.join(' + ')}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function fecharModalInconsistencias() {
+    const modal = document.getElementById('modal-inconsistencias');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+// Fechar modal ao clicar no backdrop ou Esc
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') fecharModalInconsistencias();
+});
+
 </script>
 
 <script src="{{ url_for('static', filename='sync_siprov.js') }}"></script>
+
+<!-- ====================================================== -->
+<!-- MODAL — Auditoria de inconsistências do Siprov         -->
+<!-- ====================================================== -->
+<div id="modal-inconsistencias"
+     onclick="if (event.target === this) fecharModalInconsistencias()"
+     class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div class="glass rounded-2xl border border-yellow-500/30 max-w-4xl w-full max-h-[80vh] flex flex-col">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-white/10">
+            <div class="flex items-center gap-3">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+                </svg>
+                <div>
+                    <h3 class="text-white font-bold text-lg">Auditoria — Inconsistências Siprov</h3>
+                    <p id="modal-inconsistencias-titulo" class="text-xs text-yellow-300/80">0 inconsistência(s)</p>
+                </div>
+            </div>
+            <button onclick="fecharModalInconsistencias()"
+                    class="text-slate-400 hover:text-white transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="px-6 py-3 border-b border-white/10 text-xs text-slate-400">
+            Títulos marcados como <span class="text-yellow-300 font-semibold">LIQUIDADO</span>
+            no Siprov mas sem registro completo de pagamento. Recomenda-se verificar
+            no Siprov se houve erro de cadastro.
+        </div>
+
+        <div class="overflow-y-auto flex-1">
+            <table class="w-full">
+                <thead class="sticky top-0 bg-slate-900/95 backdrop-blur">
+                    <tr class="border-b border-white/10">
+                        <th class="py-2 px-3 text-left text-[10px] uppercase tracking-wider text-slate-500">Benefício</th>
+                        <th class="py-2 px-3 text-left text-[10px] uppercase tracking-wider text-slate-500">Associado</th>
+                        <th class="py-2 px-3 text-left text-[10px] uppercase tracking-wider text-slate-500">Parcela</th>
+                        <th class="py-2 px-3 text-left text-[10px] uppercase tracking-wider text-slate-500">Unidade</th>
+                        <th class="py-2 px-3 text-left text-[10px] uppercase tracking-wider text-slate-500">Valor de Face</th>
+                        <th class="py-2 px-3 text-left text-[10px] uppercase tracking-wider text-slate-500">Problema</th>
+                    </tr>
+                </thead>
+                <tbody id="modal-inconsistencias-tbody"></tbody>
+            </table>
+        </div>
+
+        <div class="px-6 py-3 border-t border-white/10 text-[10px] text-slate-500 text-right">
+            Mostrando até 50 registros. Exporte os dados para auditoria completa.
+        </div>
+    </div>
+</div>
 
 </body>
 </html>
