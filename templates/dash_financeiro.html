@@ -823,19 +823,34 @@ function renderComparativo() {
         const [y, m] = s.split('-');
         return `${m}/${y}`;
     });
+    const lineDataset = (label, data, color) => ({
+        label,
+        data,
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 2.5,
+        tension: 0.4,
+        fill: false,
+        pointBackgroundColor: color,
+        pointBorderColor: '#0f172a',
+        pointBorderWidth: 1.5,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+    });
     charts['chart-comparativo'] = new Chart(canvas, {
-        type: 'bar',
+        type: 'line',
         data: {
             labels,
             datasets: [
-                { label: 'Recebido (Liquidado)', data: cm.liquidado, backgroundColor: '#22c55e', borderRadius: 4 },
-                { label: 'Inadimplente (Pendente)', data: cm.pendente, backgroundColor: '#ef4444', borderRadius: 4 },
-                { label: 'A Receber (Aberto)', data: cm.aberto, backgroundColor: '#3b82f6', borderRadius: 4 },
+                lineDataset('Recebido (Liquidado)',  cm.liquidado, '#22c55e'),
+                lineDataset('Inadimplente (Pendente)', cm.pendente, '#ef4444'),
+                lineDataset('A Receber (Aberto)',    cm.aberto,    '#3b82f6'),
             ],
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
                 tooltip: {
@@ -845,8 +860,8 @@ function renderComparativo() {
                 },
             },
             scales: {
-                x: { stacked: true, ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
-                y: { stacked: true, ticks: { color: '#94a3b8', font: { size: 10 }, callback: (v) => fmtBRL(v) }, grid: { color: 'rgba(255,255,255,.05)' } },
+                x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+                y: { beginAtZero: true, ticks: { color: '#94a3b8', font: { size: 10 }, callback: (v) => fmtBRL(v) }, grid: { color: 'rgba(255,255,255,.05)' } },
             },
         },
     });
@@ -856,7 +871,7 @@ function renderComparativo() {
 // CHART
 // =========================================================
 
-function renderChart(id, type, labels, data, color) {
+function renderChart(id, type, labels, data, color, opts) {
     const canvas = document.getElementById(id);
     if (!canvas) return;
 
@@ -864,6 +879,16 @@ function renderChart(id, type, labels, data, color) {
         charts[id].destroy();
         delete charts[id];
     }
+
+    // opts.isCount = true → eixo Y e tooltip em quantidade (un.) em vez de R$
+    const isCount  = !!(opts && opts.isCount);
+    const unitName = (opts && opts.unitName) || 'contratos';
+    const fmt = (v) => isCount
+        ? Number(v).toLocaleString('pt-BR') + ' ' + unitName
+        : fmtBRL(v);
+    const fmtAxis = (v) => isCount
+        ? Number(v).toLocaleString('pt-BR')
+        : fmtBRL(v);
 
     charts[id] = new Chart(canvas, {
         type,
@@ -886,7 +911,7 @@ function renderChart(id, type, labels, data, color) {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        label: ctx => ' ' + fmtBRL(ctx.raw),
+                        label: ctx => ' ' + fmt(ctx.raw),
                     },
                 },
             },
@@ -895,7 +920,7 @@ function renderChart(id, type, labels, data, color) {
                     beginAtZero: true,
                     ticks: {
                         color: '#94a3b8',
-                        callback: v => fmtBRL(v),
+                        callback: v => fmtAxis(v),
                     },
                     grid: { color: 'rgba(255,255,255,0.05)' },
                 },
@@ -913,7 +938,7 @@ function renderChart(id, type, labels, data, color) {
 // =========================================================
 
 function renderGraficos() {
-    renderChart('chart-vencimento',      'line', graficoFluxo.labels,           graficoFluxo.valores,           '#3b82f6');
+    renderChart('chart-vencimento',      'line', graficoFluxo.labels,           graficoFluxo.valores,           '#3b82f6', { isCount: true, unitName: 'contratos' });
     renderChart('chart-liquidacao',      'bar',  graficoLiquidacao.labels,       graficoLiquidacao.valores,      '#10b981');
     renderChart('chart-unidade-fantasia','bar',  graficoUnidades.labels,         graficoUnidades.valores,        '#06b6d4');
     renderChart('chart-consultores',     'bar',  graficoConsultores.labels,      graficoConsultores.valores,     '#f97316');

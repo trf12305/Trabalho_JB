@@ -263,7 +263,6 @@ def titulo_para_registro(titulo: dict, associado: dict = None) -> dict:
 
     # Endereço do associado (EnderecoTO: cidade, uf, bairro, cep, logradouro...)
     endereco = a.get("endereco") or {}
-
     # Plano principal do associado (PlanoOutputTO: nome, valor)
     planos = a.get("planos") or []
     plano_principal = ""

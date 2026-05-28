@@ -235,14 +235,12 @@ def filtrar_dados(dados, tipo='vencimento', data_inicial=None,data_final=None, b
         if tipo == 'vencimento':
             data_str = item.get('data_vencimento')
         else:
-            # Modo liquidação: usa data_liquidacao; se ausente em título
-            # LIQUIDADO, cai para data_vencimento pra não perder o título
-            # (casos raros de export Siprov com situação=LIQUIDADO sem data_liq).
-            data_str = item.get('data_liquidacao') or (
-                item.get('data_vencimento')
-                if item.get('situacao', '') in SITUACOES_LIQUIDACAO
-                else None
-            )
+            # Modo liquidação: filtra ESTRITAMENTE por data_liquidacao.
+            # Títulos LIQUIDADO sem data_liquidacao (casos raros de bug de
+            # cadastro do Siprov, ex.: Miguel/R$50) ficam de fora do modo
+            # Liquidação por design. Continuam aparecendo no badge de
+            # auditoria para correção operacional.
+            data_str = item.get('data_liquidacao')
         if not data_str:
             continue
         data_ref = parse_date(data_str)
@@ -300,6 +298,24 @@ def _fluxo_mensal(dados, campo_data, campo_valor):
     return labels, valores
 
 
+def _fluxo_mensal_contagem(dados, campo_data, campo_id):
+    """Conta IDs distintos por mês (usado para contar contratos únicos
+    no Fluxo de Vencimento via beneficio_sequencial)."""
+    fluxo = {}
+    for d in dados:
+        data_s = str(d.get(campo_data) or '')
+        if len(data_s) < 7:
+            continue
+        ident = d.get(campo_id)
+        if not ident:
+            continue
+        mes = data_s[:7]
+        fluxo.setdefault(mes, set()).add(str(ident).strip())
+    labels = sorted(fluxo)
+    valores = [len(fluxo[m]) for m in labels]
+    return labels, valores
+
+
 # =========================================================
 # DASHBOARD FINANCEIRO ANALÍTICO
 # =========================================================
@@ -319,12 +335,18 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
         ), 2,
     )
 
+    # TOTAL LIQUIDADO = SUM(titulo_valor) dos LIQUIDADO que TÊM data de
+    # liquidação efetiva. Exclui registros LIQUIDADO sem data_liquidacao
+    # (inconsistências Siprov, ex.: Miguel R$50) — esses ficam só no badge
+    # de auditoria. Garante que Vencimento e Liquidação mostrem o mesmo
+    # valor R$ 1.215.034,96 (12.405 títulos efetivamente pagos).
     total_liquidado = round(
         sum(
-            to_float(d.get('valor_liquidado', 0))
+            to_float(d.get('valor_titulo', 0))
             for d in dados
             if d.get('situacao', '') in SITUACOES_LIQUIDACAO
-            and to_float(d.get('valor_liquidado', 0)) > 0
+            and d.get('data_liquidacao')
+            and to_float(d.get('valor_titulo', 0)) > 0
         ), 2,
     )
 
@@ -357,7 +379,9 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
         if d.get('unidade')
     })
 
-    lbl_venc, val_venc = _fluxo_mensal(dados, 'data_vencimento', 'valor_titulo')
+    # Fluxo de Vencimento agora conta CONTRATOS ÚNICOS por mês
+    # (beneficio_sequencial DISTINCT), não soma de valores.
+    lbl_venc, val_venc = _fluxo_mensal_contagem(dados, 'data_vencimento', 'beneficio_sequencial')
 
     dados_pagos = [
         d for d in dados
@@ -454,7 +478,9 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
     lbl_rank_bases  = [b for b, _ in rank_bases]
     val_rank_bases  = [round(v, 2) for _, v in rank_bases]
 
-    # Comparativo mensal (face vs liquidado)
+    # Comparativo mensal — TODAS as séries usam titulo_valor (FACE)
+    # pra ficar consistente com o restante do dashboard. Liquidado
+    # exige data_liquidacao preenchida (exclui inconsistências).
     comparativo_mensal = {}
     for d in dados:
         mes = (d.get('data_vencimento') or '')[:7]
@@ -463,13 +489,14 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
         if mes not in comparativo_mensal:
             comparativo_mensal[mes] = {'face': 0, 'liquidado': 0, 'pendente': 0, 'aberto': 0}
         sit = (d.get('situacao') or '').strip().upper()
-        comparativo_mensal[mes]['face'] += to_float(d.get('valor_titulo', 0))
-        if sit in SITUACOES_LIQUIDACAO:
-            comparativo_mensal[mes]['liquidado'] += to_float(d.get('valor_liquidado', 0))
+        valor = to_float(d.get('valor_titulo', 0))
+        comparativo_mensal[mes]['face'] += valor
+        if sit in SITUACOES_LIQUIDACAO and d.get('data_liquidacao'):
+            comparativo_mensal[mes]['liquidado'] += valor
         elif sit in SIT_PENDENTE:
-            comparativo_mensal[mes]['pendente'] += to_float(d.get('valor_titulo', 0))
+            comparativo_mensal[mes]['pendente'] += valor
         elif sit in SIT_ABERTO:
-            comparativo_mensal[mes]['aberto'] += to_float(d.get('valor_titulo', 0))
+            comparativo_mensal[mes]['aberto'] += valor
     cm_labels = sorted(comparativo_mensal.keys())
     cm_face      = [round(comparativo_mensal[m]['face'], 2)      for m in cm_labels]
     cm_liquidado = [round(comparativo_mensal[m]['liquidado'], 2) for m in cm_labels]
@@ -492,8 +519,11 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
     # Títulos marcados LIQUIDADO mas sem dados de liquidação
     # (data_liquidacao OU valor_liquidado ausentes). Sinaliza
     # bugs de cadastro no Siprov para auditoria operacional.
+    # Audita TODOS os processados (dados_completos), não apenas os filtrados,
+    # para que o badge continue sinalizando o Miguel mesmo em modo Liquidação
+    # (onde ele é excluído do filtro por falta de data_liquidacao).
     inconsistencias_lista = []
-    for d in dados:
+    for d in dados_completos:
         if d.get('situacao', '') in SITUACOES_LIQUIDACAO:
             if not d.get('data_liquidacao') or to_float(d.get('valor_liquidado', 0)) <= 0:
                 inconsistencias_lista.append({
