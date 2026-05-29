@@ -42,6 +42,8 @@ app.secret_key                = os.environ.get('SECRET_KEY', 'dev-fallback-CHANG
 app.permanent_session_lifetime = timedelta(hours=8)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Upload de JSON do Siprov pode chegar a ~30MB; permitimos até 50MB.
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 ADMIN_USER = os.environ.get('ADMIN_USER', 'marcone')
 ADMIN_PASS = os.environ.get('ADMIN_PASS', '3209')
@@ -1341,6 +1343,104 @@ def api_admin_sync():
         'status': 'bloqueado',
         'mensagem': 'Sincronização desativada. O sistema está usando o JSON local como única fonte de dados.'
     }), 423  # 423 Locked
+
+
+# =========================================================
+# UPLOAD DE JSON — modo JSON-only (deploy Railway/produção)
+# =========================================================
+# Permite ao admin substituir o arquivo data/dashboard_financeiro_live.json
+# diretamente via navegador, sem precisar de FTP/SSH/redeploy.
+# Salva no diretório data/ e invalida o cache em memória.
+
+@app.route('/admin/upload', methods=['GET'])
+@login_required
+def admin_upload_page():
+    return render_template('admin_upload.html')
+
+
+@app.route('/api/admin/upload-json', methods=['POST'])
+@login_required
+def api_admin_upload_json():
+    if 'arquivo' not in request.files:
+        return jsonify({'status': 'erro', 'mensagem': 'Nenhum arquivo enviado.'}), 400
+
+    arquivo = request.files['arquivo']
+    if not arquivo or not arquivo.filename:
+        return jsonify({'status': 'erro', 'mensagem': 'Arquivo vazio.'}), 400
+
+    if not arquivo.filename.lower().endswith('.json'):
+        return jsonify({'status': 'erro', 'mensagem': 'O arquivo deve ter extensão .json'}), 400
+
+    try:
+        conteudo = arquivo.read()
+        try:
+            dados = json.loads(conteudo)
+        except json.JSONDecodeError as e:
+            return jsonify({
+                'status': 'erro',
+                'mensagem': f'JSON inválido: {str(e)[:200]}',
+            }), 400
+
+        if not isinstance(dados, list):
+            return jsonify({
+                'status': 'erro',
+                'mensagem': 'O JSON deve ser uma lista de registros.',
+            }), 400
+
+        if len(dados) == 0:
+            return jsonify({
+                'status': 'erro',
+                'mensagem': 'A lista está vazia.',
+            }), 400
+
+        primeiro = dados[0]
+        campos_chave = ('titulo_situacao_titulo', 'titulo_valor', 'beneficio_sequencial')
+        campos_presentes = [c for c in campos_chave if c in primeiro]
+        if len(campos_presentes) < 2:
+            return jsonify({
+                'status': 'erro',
+                'mensagem': (
+                    'O JSON não parece ser do dashboard financeiro. '
+                    f'Esperava campos como {campos_chave}. '
+                    f'Encontrei só: {campos_presentes}.'
+                ),
+            }), 400
+
+        data_dir = os.path.join(BASE_DIR, 'data')
+        os.makedirs(data_dir, exist_ok=True)
+        destino = os.path.join(data_dir, 'dashboard_financeiro_live.json')
+        tmp = destino + '.tmp'
+        with open(tmp, 'wb') as f:
+            f.write(conteudo)
+        if os.path.exists(destino):
+            os.replace(tmp, destino)
+        else:
+            os.rename(tmp, destino)
+
+        for k in ('arquivo', 'mtime', 'dados_brutos',
+                  'dados_processados', 'dados_eventos', 'dados_vendas'):
+            _cache[k] = None
+
+        logger.info(
+            f'[UPLOAD] JSON substituído: {len(dados):,} registros '
+            f'({len(conteudo)/1024/1024:.1f} MB) por {session.get("usuario", "?")}'
+        )
+        return jsonify({
+            'status': 'ok',
+            'registros': len(dados),
+            'tamanho_mb': round(len(conteudo) / 1024 / 1024, 2),
+            'mensagem': (
+                f'Arquivo carregado com sucesso: {len(dados):,} registros. '
+                'O dashboard já está usando os novos dados.'
+            ),
+        })
+
+    except Exception:
+        logger.exception('[UPLOAD] Falha ao processar arquivo')
+        return jsonify({
+            'status': 'erro',
+            'mensagem': 'Erro interno ao processar o arquivo. Veja os logs.',
+        }), 500
 
 
 @app.route('/api/admin/sync/status')
