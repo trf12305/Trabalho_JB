@@ -1358,6 +1358,49 @@ def admin_upload_page():
     return render_template('admin_upload.html')
 
 
+@app.route('/admin/debug', methods=['GET'])
+@login_required
+def admin_debug():
+    """Diagnóstico do filesystem — útil pra verificar mount de volume no Railway."""
+    import subprocess
+    info = {
+        'BASE_DIR': BASE_DIR,
+        'cwd': os.getcwd(),
+        '__file__': os.path.abspath(__file__),
+        'FLASK_ENV': os.environ.get('FLASK_ENV'),
+        'PORT': os.environ.get('PORT'),
+        'RAILWAY_ENV': {k: v for k, v in os.environ.items() if 'RAILWAY' in k},
+    }
+    data_dir = os.path.join(BASE_DIR, 'data')
+    info['data_dir'] = data_dir
+    info['data_dir_exists'] = os.path.exists(data_dir)
+    if info['data_dir_exists']:
+        try:
+            arquivos = []
+            for f in os.listdir(data_dir):
+                full = os.path.join(data_dir, f)
+                arquivos.append({
+                    'nome': f,
+                    'tamanho_bytes': os.path.getsize(full) if os.path.isfile(full) else None,
+                    'mtime': datetime.fromtimestamp(os.path.getmtime(full)).isoformat() if os.path.exists(full) else None,
+                    'is_dir': os.path.isdir(full),
+                })
+            info['data_dir_contents'] = arquivos
+        except Exception as e:
+            info['data_dir_error'] = str(e)
+    try:
+        mounts = subprocess.check_output(['mount'], stderr=subprocess.STDOUT, timeout=3).decode()
+        info['mounts_with_data'] = [l for l in mounts.split('\n') if '/data' in l or '/app' in l]
+    except Exception as e:
+        info['mounts_error'] = str(e)
+    try:
+        df = subprocess.check_output(['df', '-h', data_dir], stderr=subprocess.STDOUT, timeout=3).decode()
+        info['df_data_dir'] = df.strip().split('\n')
+    except Exception as e:
+        info['df_error'] = str(e)
+    return jsonify(info)
+
+
 @app.route('/api/admin/upload-json', methods=['POST'])
 @login_required
 def api_admin_upload_json():
