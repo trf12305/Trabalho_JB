@@ -419,8 +419,21 @@ def _atualizar_dashboard_live(registros: list, _ignorado=None, lock=None) -> Non
 
 
 def _dedup_key(item: dict) -> str:
-    """Chave única de um título para deduplicação entre filtros vencimento+liquidacao."""
-    return str(item.get("codTitulo") or item.get("titulo_parcela") or id(item))
+    """Chave única REAL de um título. Usada só quando a fusão
+    vencimento+liquidacao está ativa (hoje desativada).
+
+    BUG corrigido: antes usava titulo_parcela (valores 1-12) que
+    colapsava ~69 mil títulos em ~61. Agora compõe a chave de campos
+    que identificam unicamente o título; cai para id() se faltarem."""
+    partes = [
+        str(item.get("beneficio_sequencial") or ""),
+        str(item.get("titulo_parcela") or ""),
+        str(item.get("titulo_data_vencimento") or ""),
+        str(item.get("titulo_conta") or ""),
+        str(item.get("titulo_descricao") or ""),
+    ]
+    chave = "|".join(partes).strip("|")
+    return chave if chave.replace("|", "") else str(id(item))
 
 
 def _solicitar_relatorio(token: str, tipo_lancamento: str,
@@ -715,23 +728,13 @@ def coletar_titulos(token: str) -> list[dict]:
                         log.info(f"  Baixado {mes:02d}/{ano} {tipo}/{filtro_data}: {len(itens)} itens")
                         concluidos[chave] = itens
 
-                        # Salva no cache do mês — deduplica por codTitulo antes de gravar
+                        # Salva no cache do mês. Com a fusão vencimento+liquidacao
+                        # DESATIVADA, cada mês tem 1 só relatório → grava direto os
+                        # itens (sem merge/dedup, que antes destruía os dados).
                         cache_file = cache_dir / f"{ano}_{mes:02d}.json"
-                        existentes: list = []
-                        if cache_file.exists():
-                            try:
-                                with open(cache_file, encoding="utf-8") as f:
-                                    existentes = json.load(f)
-                            except Exception:
-                                existentes = []
-                        # Deduplicação: vencimento + liquidacao podem retornar o mesmo título
-                        _vistos: dict = {_dedup_key(r): r for r in existentes}
-                        for item in itens:
-                            _vistos.setdefault(_dedup_key(item), item)
-                        merged = list(_vistos.values())
                         tmp = cache_file.with_suffix(".json.tmp")
                         with open(tmp, "w", encoding="utf-8") as f:
-                            json.dump(merged, f, ensure_ascii=False)
+                            json.dump(itens, f, ensure_ascii=False)
                         tmp.replace(cache_file)
 
                         # Live update acumulado (dedup será feito ao final)
@@ -754,18 +757,12 @@ def coletar_titulos(token: str) -> list[dict]:
                 log.error(f"  Timeout global ({TIMEOUT_GLOBAL}s): "
                           f"{mes:02d}/{ano} {tipo}/{filtro_data} cod={cod} nunca finalizou")
 
-    # Deduplicação final: fusão vencimento+liquidacao pode duplicar títulos pagos no prazo
-    if todos:
-        _vistos_final: dict = {}
-        for item in todos:
-            _vistos_final.setdefault(_dedup_key(item), item)
-        n_antes = len(todos)
-        todos = list(_vistos_final.values())
-        n_dup = n_antes - len(todos)
-        if n_dup:
-            log.info(f"  Deduplicação final: {n_dup} registros removidos (mesmo codTitulo em vencimento+liquidacao)")
-
-    log.info(f"TOTAL: {len(todos)} títulos coletados (após deduplicação)")
+    # Deduplicação final DESATIVADA. A fusão vencimento+liquidacao está
+    # desligada (filtros_data=["vencimento"]) e cada relatório é de um mês
+    # distinto, sem sobreposição. O Siprov é a fonte de verdade — manter
+    # todos os registros faz o total bater com os relatórios oficiais.
+    # (Para reativar, restaure o bloco de dedup usando _dedup_key.)
+    log.info(f"TOTAL: {len(todos)} títulos coletados (sem deduplicação)")
     _set(titulos_total=len(todos))
     return todos
 
