@@ -766,17 +766,13 @@ function exportarCSV() {
     }
     window.location.href = '/api/vendas/export?' + params.toString();
 }
-
 document.getElementById('btn-exportar').addEventListener('click', exportarCSV);
-
 // =========================================================
 // AUTO-REFRESH
 // =========================================================
-
 let _arInterval  = null;
 let _arCountdown = 0;
 const AR_SEGUNDOS = 300;
-
 function toggleAutoRefresh() {
     const btn = document.getElementById('btn-auto-refresh');
     if (_arInterval) {
@@ -801,13 +797,10 @@ function toggleAutoRefresh() {
         }, 1000);
     }
 }
-
 document.getElementById('btn-auto-refresh').addEventListener('click', toggleAutoRefresh);
-
 // =========================================================
 // URL STATE
 // =========================================================
-
 function atualizarURL() {
     const p = new URLSearchParams();
     if (filtroDataInicial) p.set('di', filtroDataInicial);
@@ -818,7 +811,6 @@ function atualizarURL() {
     const q = p.toString();
     history.replaceState(null, '', q ? '?' + q : window.location.pathname);
 }
-
 function lerURLParams() {
     const p = new URLSearchParams(window.location.search);
     filtroDataInicial = p.get('di') || null;
@@ -829,11 +821,9 @@ function lerURLParams() {
     document.getElementById('filtro-data-inicial').value = filtroDataInicial || '';
     document.getElementById('filtro-data-final').value   = filtroDataFinal   || '';
 }
-
 // =========================================================
 // LOAD
 // =========================================================
-
 document.addEventListener('DOMContentLoaded', () => {
     lerURLParams();
     loadData();

@@ -861,11 +861,20 @@ def sincronizar():
 
     registros = titulos  # uso direto, sem conversão
 
-    # Salva
+    # Salva backup em JSON (histórico)
     ts = inicio.strftime("%Y%m%d_%H%M%S")
     arquivo = DATA_DIR / f"dashboard_financeiro_{ts}.json"
     with open(arquivo, "w", encoding="utf-8") as f:
         json.dump(registros, f, ensure_ascii=False, indent=2)
+
+    # Grava no banco SQLite (replace por mês, respeitando anos congelados)
+    try:
+        import db as bancodados
+        bancodados.init_db()
+        stats_db = bancodados.substituir_periodo(registros)
+        log.info(f"  [DB] Gravado no banco: {stats_db}")
+    except Exception as e:
+        log.warning(f"  [DB] Falha ao gravar no banco: {e}")
 
     kb = arquivo.stat().st_size // 1024
     duracao = round((datetime.now() - inicio).total_seconds(), 1)

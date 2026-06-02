@@ -99,27 +99,22 @@
         tick();
     }
 
-    // =====================================================
-    // MODO JSON-ONLY ATIVO
-    // =====================================================
-    // Endpoint /api/admin/sync está bloqueado no backend.
-    // Botão fica em modo informativo: avisa que a sync está
-    // desativada em vez de tentar disparar requisição.
-    btn.classList.remove('bg-orange-600', 'hover:bg-orange-500');
-    btn.classList.add('bg-slate-700', 'hover:bg-slate-600', 'cursor-not-allowed');
-    btn.title = 'Sincronização desativada — sistema em modo JSON local.';
-    label.textContent = 'JSON LOCAL';
-    if (icon) icon.textContent = '🔒';
-
-    btn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        // Visual feedback de bloqueio
-        const original = label.textContent;
-        label.textContent = 'Modo JSON ativo';
-        if (statusText) {
-            statusText.innerHTML = '<span class="text-yellow-400">ⓘ Sincronização desativada. Sistema usa apenas o JSON local como fonte de dados.</span>';
+    btn.addEventListener('click', async () => {
+        if (btn.disabled) return;
+        btn.disabled = true;
+        label.textContent = 'Disparando…';
+        try {
+            const r = await fetch('/api/admin/sync', { method: 'POST' });
+            if (!r.ok) {
+                statusText.textContent = 'Erro ao iniciar sync.';
+                btn.disabled = false;
+                return;
+            }
+            iniciarPolling();
+        } catch (e) {
+            statusText.textContent = 'Erro de conexão ao iniciar sync.';
+            btn.disabled = false;
         }
-        setTimeout(() => { label.textContent = original; }, 2500);
     });
 
     // CSS pra animação do ícone

@@ -20,6 +20,8 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+import db as bancodados
+
 # =========================================================
 # LOGGING
 # =========================================================
@@ -106,6 +108,107 @@ def extrair_nome(texto):
 
 
 # =========================================================
+# CLASSIFICADORES — Tipo de Veículo, Faixa de Valor, Nível
+# =========================================================
+
+# Palavras-chave de motos (modelos Honda/Yamaha/Shineray)
+_MOTO_KEYS = (
+    'MOTO', 'POP', 'BIZ', 'CG ', 'CG-', 'CG1', 'CG6', 'BROS', 'XRE',
+    'FACTOR', 'FAZER', 'CROSSER', 'PCX', 'NMAX', 'MT-03', 'SHINERAY',
+    'CB ', 'CB2', 'CB3', 'FAN', 'NEO', 'FLUO', 'XTZ', 'SAHARA',
+    'TORNADO', 'LANDER', 'TENERE', 'ADV', 'FZ ', 'FZ1', 'FZ2',
+    'YAMAHA', 'HONDA', 'TWISTER', 'TITAN', 'START', 'SHI ', 'SH ',
+    '50CC',
+)
+
+
+def classificar_tipo_veiculo(plano, categoria=''):
+    """Classifica o tipo de veículo com base no plano + categoria do JSON.
+    Retorna: MOTO, CARRO LEVE, CARRO SUV, CARRO DIESEL, ESPORTIVA,
+    SCOOTER, TRAIL ou OUTROS."""
+    p = (plano or '').upper().strip()
+    c = (categoria or '').upper().strip()
+
+    # 1) Pela string do plano (mais específico)
+    if 'SCOOTER' in p:
+        return 'SCOOTER'
+    if 'TRAIL' in p:
+        return 'TRAIL'
+    if 'ESPORTIVA' in p or 'NAKED' in p:
+        return 'ESPORTIVA'
+    if 'DIESEL' in p:
+        return 'CARRO DIESEL'
+    if 'SUV' in p or 'CAMINHONETE' in p or 'PICKUP' in p:
+        return 'CARRO SUV'
+    if 'CARRO - LEVE' in p or 'CARROS DE' in p or 'CARRO -' in p \
+            or p.startswith('CARRO') or p.startswith('CARROS') \
+            or 'PASSEIO' in p:
+        return 'CARRO LEVE'
+    if any(k in p for k in _MOTO_KEYS):
+        return 'MOTO'
+
+    # 2) Fallback: usa veiculo_categoria do JSON
+    if c == 'MOTOCICLETA':
+        return 'MOTO'
+    if c == 'LEVE':
+        return 'CARRO LEVE'
+    if c in ('UTILITARIO', 'UTILITÁRIO'):
+        return 'CARRO SUV'
+    if c == 'PICKUP':
+        return 'CARRO SUV'
+
+    return 'OUTROS'
+
+
+# Buckets de valor do veículo (5 faixas)
+_FAIXAS_VALOR = [
+    (20_000,            'ATÉ R$ 20k'),
+    (50_000,            'R$ 20k a 50k'),
+    (100_000,           'R$ 50k a 100k'),
+    (150_000,           'R$ 100k a 150k'),
+    (float('inf'),      'ACIMA DE R$ 150k'),
+]
+_FAIXAS_ORDEM = [f[1] for f in _FAIXAS_VALOR] + ['SEM VALOR']
+
+
+def classificar_faixa_valor(valor_veiculo):
+    """Classifica o valor do veículo em faixas (buckets)."""
+    v = float(valor_veiculo or 0)
+    if v <= 0:
+        return 'SEM VALOR'
+    for limite, rotulo in _FAIXAS_VALOR:
+        if v <= limite:
+            return rotulo
+    return 'ACIMA DE R$ 150k'
+
+
+# Níveis de cobertura comercial dos planos
+_NIVEIS_COBERTURA_ORDEM = [
+    'PREMIUM', 'LIBERTY', 'ECONOMY', 'FACILITY',
+    'BÁSICO', 'ROUBO E FURTO', 'SEM NÍVEL',
+]
+
+
+def classificar_nivel_cobertura(plano):
+    """Identifica o nível de cobertura (PREMIUM/ECONOMY/LIBERTY/BÁSICO/etc).
+    Caso o plano não contenha palavra-chave, retorna 'SEM NÍVEL'."""
+    p = (plano or '').upper()
+    if 'PREMIUM' in p:
+        return 'PREMIUM'
+    if 'LIBERTY' in p:
+        return 'LIBERTY'
+    if 'ECONOMY' in p:
+        return 'ECONOMY'
+    if 'FACILITY' in p:
+        return 'FACILITY'
+    if 'ROUBO E FURTO' in p or 'ROUBO/FURTO' in p:
+        return 'ROUBO E FURTO'
+    if 'BÁSICO' in p or 'BASICO' in p:
+        return 'BÁSICO'
+    return 'SEM NÍVEL'
+
+
+# =========================================================
 # SITUAÇÕES DE LIQUIDAÇÃO
 # =========================================================
 
@@ -145,18 +248,42 @@ def _cache_invalido(arquivo):
 # ARQUIVOS
 # =========================================================
 
-def carregar_dados_json():
+def _carregar_do_json_legado():
+    """Fallback: lê o JSON em data/ (usado se o banco estiver vazio)."""
     padrao = os.path.join(BASE_DIR, 'data', 'dashboard_financeiro*.json')
     arquivos = glob.glob(padrao)
     if not arquivos:
-        logger.warning('[DADOS] Nenhum arquivo JSON encontrado em data/')
         return []
     arquivo = max(arquivos, key=os.path.getmtime)
-    _cache_invalido(arquivo)
+    with open(arquivo, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def carregar_dados_json():
+    """
+    Fonte de dados do dashboard: banco SQLite (db.py).
+    Invalida o cache pela chave 'ultima_sync' do banco.
+    Se o banco estiver vazio, cai para o JSON legado e o importa.
+    """
+    chave_sync = bancodados.meta_get('ultima_sync') or 'vazio'
+    if _cache['arquivo'] != chave_sync:
+        _cache['arquivo']           = chave_sync
+        _cache['dados_brutos']      = None
+        _cache['dados_processados'] = None
+
     if _cache['dados_brutos'] is None:
-        with open(arquivo, 'r', encoding='utf-8') as f:
-            _cache['dados_brutos'] = json.load(f)
-        logger.info(f'[DADOS] Carregados {len(_cache["dados_brutos"])} registros de {os.path.basename(arquivo)}')
+        total = bancodados.contar()
+        if total == 0:
+            # Banco vazio → importa o JSON legado uma vez
+            legado = _carregar_do_json_legado()
+            if legado:
+                logger.info(f'[DADOS] Banco vazio — importando {len(legado)} registros do JSON legado.')
+                bancodados.substituir_periodo(legado)
+                _cache['arquivo'] = bancodados.meta_get('ultima_sync') or 'vazio'
+            _cache['dados_brutos'] = legado
+        else:
+            _cache['dados_brutos'] = bancodados.ler_titulos()
+            logger.info(f'[DADOS] Carregados {len(_cache["dados_brutos"])} registros do banco SQLite.')
     return _cache['dados_brutos']
 
 
@@ -210,6 +337,8 @@ def processar_dados_para_dash(dados_originais):
             'cidade':    (item.get('endereco_cidade') or '').strip(),
             'uf':        (item.get('endereco_uf')     or '').strip(),
             'plano':     (item.get('beneficio_planos_principais') or '').strip() or 'SEM PLANO',
+            'categoria_veiculo': (item.get('veiculo_categoria') or '').strip().upper(),
+            'valor_veiculo':     to_float(item.get('veiculo_valor_veiculo')),
             'tipo_titulo': (item.get('titulo_tipo_titulo') or 'N/A').strip(),
             'situacao':  (item.get('titulo_situacao_titulo') or '').strip().upper(),
             'data_vencimento': item.get('titulo_data_vencimento'),
@@ -237,12 +366,16 @@ def filtrar_dados(dados, tipo='vencimento', data_inicial=None,data_final=None, b
         if tipo == 'vencimento':
             data_str = item.get('data_vencimento')
         else:
-            # Modo liquidação: filtra ESTRITAMENTE por data_liquidacao.
-            # Títulos LIQUIDADO sem data_liquidacao (casos raros de bug de
-            # cadastro do Siprov, ex.: Miguel/R$50) ficam de fora do modo
-            # Liquidação por design. Continuam aparecendo no badge de
-            # auditoria para correção operacional.
-            data_str = item.get('data_liquidacao')
+            # Modo liquidação: usa data_liquidacao quando existe; se ausente
+            # em título LIQUIDADO (inconsistência Siprov, ex.: Miguel R$50),
+            # cai para data_vencimento como fallback. Assim o valor entra
+            # no total (consistente com o Excel) e o caso continua
+            # sinalizado no badge de auditoria para correção operacional.
+            data_str = item.get('data_liquidacao') or (
+                item.get('data_vencimento')
+                if item.get('situacao', '') in SITUACOES_LIQUIDACAO
+                else None
+            )
         if not data_str:
             continue
         data_ref = parse_date(data_str)
@@ -275,13 +408,18 @@ def filtrar_dados(dados, tipo='vencimento', data_inicial=None,data_final=None, b
 # HELPERS DE AGREGAÇÃO
 # =========================================================
 
-def _top_por_valor(dados, campo, top=10):
+def _top_por_valor(dados, campo, top=10, campo_valor='valor_filtro'):
+    """Agrupa por `campo` e soma `campo_valor`. Por padrão usa 'valor_filtro'
+    (que muda conforme o modo: titulo_valor em Vencimento, valor_liquidado em
+    Liquidação). Passe campo_valor='valor_titulo' para fixar no FACE em ambos
+    os modos."""
     agg = {}
     for d in dados:
         chave = (d.get(campo) or 'N/A').strip() or 'N/A'
-        agg[chave] = agg.get(chave, 0) + to_float(d.get('valor_filtro', 0))
+        agg[chave] = agg.get(chave, 0) + to_float(d.get(campo_valor, 0))
     top_items = sorted(agg.items(), key=lambda x: x[1], reverse=True)[:top]
     return (
+        
         [x[0] for x in top_items],
         [round(x[1], 2) for x in top_items],
     )
@@ -336,18 +474,16 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
             if to_float(d.get('valor_titulo', 0)) > 0
         ), 2,
     )
-
-    # TOTAL LIQUIDADO = SUM(titulo_valor) dos LIQUIDADO que TÊM data de
-    # liquidação efetiva. Exclui registros LIQUIDADO sem data_liquidacao
-    # (inconsistências Siprov, ex.: Miguel R$50) — esses ficam só no badge
-    # de auditoria. Garante que Vencimento e Liquidação mostrem o mesmo
-    # valor R$ 1.215.034,96 (12.405 títulos efetivamente pagos).
+    # TOTAL LIQUIDADO = SUM(titulo_valor) de TODOS os títulos com
+    # situação LIQUIDADO/PAGO/QUITADO, inclusive os sem data_liquidacao
+    # (Miguel R$50). Esses casos continuam aparecendo no badge de auditoria
+    # para correção operacional, mas o valor entra no total — assim o
+    # dashboard bate com o Excel oficial e o operacional decide o que fazer.
     total_liquidado = round(
         sum(
             to_float(d.get('valor_titulo', 0))
             for d in dados
             if d.get('situacao', '') in SITUACOES_LIQUIDACAO
-            and d.get('data_liquidacao')
             and to_float(d.get('valor_titulo', 0)) > 0
         ), 2,
     )
@@ -391,13 +527,45 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
         and d.get('data_liquidacao')
         and to_float(d.get('valor_liquidado', 0)) > 0
     ]
-    lbl_liq, val_liq = _fluxo_mensal(dados_pagos, 'data_liquidacao', 'valor_liquidado')
+    # Fluxo de Recebimento: agora soma titulo_valor (FACE) dos pagos.
+    # Antes usava liquidacao_valor_liquidado (caixa com juros).
+    lbl_liq, val_liq = _fluxo_mensal(dados_pagos, 'data_liquidacao', 'valor_titulo')
+    # Top Unidades, Consultores e Formas de Pagamento: fixados em
+    # titulo_valor (FACE) — mesmo valor em Vencimento e Liquidação.
+    lbl_und,   val_und   = _top_por_valor(dados,       'unidade',         top=10, campo_valor='valor_titulo')
+    lbl_cons,  val_cons  = _top_por_valor(dados,       'consultor',       top=10, campo_valor='valor_titulo')
+    lbl_fp,    val_fp    = _top_por_valor(dados_pagos, 'forma_pagamento', top=10, campo_valor='valor_titulo')
+    lbl_rep,   val_rep   = _top_por_valor(dados,       'representante',   top=10, campo_valor='valor_titulo')
 
-    lbl_und,   val_und   = _top_por_valor(dados,       'unidade',         top=10)
-    lbl_cons,  val_cons  = _top_por_valor(dados,       'consultor',       top=10)
-    lbl_fp,    val_fp    = _top_por_valor(dados_pagos, 'forma_pagamento', top=10)
-    lbl_plano, val_plano = _top_por_valor(dados,       'plano',           top=10)
-    lbl_rep,   val_rep   = _top_por_valor(dados,       'representante',   top=10)
+    # =====================================================
+    # NOVOS GRÁFICOS — Tipo de Veículo / Faixa de Valor /
+    # Nível de Cobertura (substitui Top Planos)
+    # =====================================================
+
+    # Top Planos por NÍVEL DE COBERTURA (PREMIUM/ECONOMY/LIBERTY/BÁSICO...)
+    nivel_agg = {}
+    for d in dados:
+        nv = classificar_nivel_cobertura(d.get('plano'))
+        nivel_agg[nv] = nivel_agg.get(nv, 0) + to_float(d.get('valor_titulo', 0))
+    lbl_plano = [k for k in _NIVEIS_COBERTURA_ORDEM if k in nivel_agg]
+    val_plano = [round(nivel_agg[k], 2) for k in lbl_plano]
+
+    # Tipo de Veículo (MOTO / CARRO LEVE / CARRO SUV / DIESEL / ESPORTIVA / SCOOTER / TRAIL)
+    tipo_v_agg = {}
+    for d in dados:
+        tv = classificar_tipo_veiculo(d.get('plano'), d.get('categoria_veiculo'))
+        tipo_v_agg[tv] = tipo_v_agg.get(tv, 0) + to_float(d.get('valor_titulo', 0))
+    tipo_v_ord = sorted(tipo_v_agg.items(), key=lambda x: x[1], reverse=True)
+    lbl_tipo_v = [k for k, _ in tipo_v_ord]
+    val_tipo_v = [round(v, 2) for _, v in tipo_v_ord]
+
+    # Faixa de Valor do Veículo (5 buckets + SEM VALOR)
+    faixa_agg = {}
+    for d in dados:
+        fx = classificar_faixa_valor(d.get('valor_veiculo'))
+        faixa_agg[fx] = faixa_agg.get(fx, 0) + to_float(d.get('valor_titulo', 0))
+    lbl_faixa = [k for k in _FAIXAS_ORDEM if k in faixa_agg]
+    val_faixa = [round(faixa_agg[k], 2) for k in lbl_faixa]
 
     dados_ord = sorted(dados, key=lambda x: x.get('data_filtro') or '', reverse=True)
     tabela = [
@@ -421,7 +589,6 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
     # Separar por situação
     SIT_ABERTO    = frozenset({'ABERTO', 'EM ABERTO'})
     SIT_PENDENTE  = frozenset({'PENDENTE', 'ATRASADO'})
-
     a_receber  = 0.0   # Aberto: ainda vai vencer
     inadimpl   = 0.0   # Pendente: venceu sem pagar
     qtd_inadim = 0
@@ -433,7 +600,6 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
     n_atrasados = 0
     soma_dso = 0
     n_dso = 0
-
     for d in dados:
         sit = (d.get('situacao') or '').strip().upper()
         valor = to_float(d.get('valor_titulo', 0))
@@ -461,7 +627,6 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
                 if 0 <= dias <= 365 * 2:  # corte sanidade
                     soma_dso += dias
                     n_dso += 1
-
     pct_conversao = round(
         (total_liquidado / total_face * 100) if total_face > 0 else 0.0, 1
     )
@@ -470,7 +635,6 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
     )
     atraso_medio = round(soma_atraso_dias / n_atrasados, 1) if n_atrasados else 0.0
     dso = round(soma_dso / n_dso, 1) if n_dso else 0.0
-
     # Receita por base (ranking)
     receita_por_base = {}
     for d in dados:
@@ -479,7 +643,6 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
     rank_bases = sorted(receita_por_base.items(), key=lambda x: x[1], reverse=True)
     lbl_rank_bases  = [b for b, _ in rank_bases]
     val_rank_bases  = [round(v, 2) for _, v in rank_bases]
-
     # Comparativo mensal — TODAS as séries usam titulo_valor (FACE)
     # pra ficar consistente com o restante do dashboard. Liquidado
     # exige data_liquidacao preenchida (exclui inconsistências).
@@ -493,7 +656,7 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
         sit = (d.get('situacao') or '').strip().upper()
         valor = to_float(d.get('valor_titulo', 0))
         comparativo_mensal[mes]['face'] += valor
-        if sit in SITUACOES_LIQUIDACAO and d.get('data_liquidacao'):
+        if sit in SITUACOES_LIQUIDACAO:
             comparativo_mensal[mes]['liquidado'] += valor
         elif sit in SIT_PENDENTE:
             comparativo_mensal[mes]['pendente'] += valor
@@ -504,7 +667,6 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
     cm_liquidado = [round(comparativo_mensal[m]['liquidado'], 2) for m in cm_labels]
     cm_pendente  = [round(comparativo_mensal[m]['pendente'], 2)  for m in cm_labels]
     cm_aberto    = [round(comparativo_mensal[m]['aberto'], 2)    for m in cm_labels]
-
     # MoM (último vs penúltimo mês)
     mom = 0.0
     if len(cm_labels) >= 2 and cm_liquidado[-2] > 0:
@@ -581,6 +743,8 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
             'formas_pagamento': {'labels': lbl_fp,    'valores': val_fp},
             'planos':           {'labels': lbl_plano, 'valores': val_plano},
             'representantes':   {'labels': lbl_rep,   'valores': val_rep},
+            'tipos_veiculo':    {'labels': lbl_tipo_v, 'valores': val_tipo_v},
+            'faixa_valor':      {'labels': lbl_faixa,  'valores': val_faixa},
             'rank_bases':       {'labels': lbl_rank_bases,  'valores': val_rank_bases},
             'comparativo':      {
                 'labels':    cm_labels,
@@ -634,6 +798,106 @@ def api_financeiro():
     except Exception:
         logger.exception('[ERRO] api_financeiro')
         return jsonify({'erro': 'Falha ao processar os dados financeiros.'}), 500
+
+
+# =========================================================
+# YoY — Comparativo Year over Year
+# =========================================================
+# Compara o mesmo mês de dois anos consecutivos.
+# Lê DIRETO do banco SQLite (não passa pelo cache de JSON),
+# pois pode haver dados do ano anterior CONGELADOS no banco
+# que não estão no JSON da sync atual.
+
+def _resumo_mes_banco(ano, mes, situacoes_liq):
+    """Retorna métricas agregadas (face, liquidado, qtd) para um (ano, mes)
+    direto do banco SQLite. Não usa o cache em memória."""
+    titulos = bancodados.ler_titulos(ano=ano, mes=mes)
+    if not titulos:
+        return None
+    face = 0.0
+    liquidado_face = 0.0
+    qtd_total = 0
+    qtd_liquidados = 0
+    for t in titulos:
+        qtd_total += 1
+        v = to_float(t.get('titulo_valor'))
+        face += v
+        sit = (t.get('titulo_situacao_titulo') or '').strip().upper()
+        if sit in situacoes_liq:
+            liquidado_face += v
+            qtd_liquidados += 1
+    return {
+        'ano': ano,
+        'mes': mes,
+        'face': round(face, 2),
+        'liquidado': round(liquidado_face, 2),
+        'qtd_total': qtd_total,
+        'qtd_liquidados': qtd_liquidados,
+    }
+
+
+def _variacao_pct(atual, anterior):
+    if anterior is None or anterior == 0:
+        return None
+    return round(((atual - anterior) / anterior) * 100, 1)
+
+
+@app.route('/api/financeiro/yoy')
+@login_required
+def api_financeiro_yoy():
+    """Comparativo YoY (Year over Year) — mesmo mês de dois anos consecutivos.
+
+    Parâmetros:
+      ano: ano atual (default = ano corrente)
+      mes: mês a comparar (default = mês corrente, 1-12)
+
+    Retorna:
+      atual    — métricas do (ano, mes)
+      anterior — métricas do (ano-1, mes)
+      variacao_pct — % de variação atual vs anterior
+      tem_anterior — True se há dados do ano anterior no banco
+    """
+    try:
+        hoje = datetime.now()
+        try:
+            ano = int(request.args.get('ano') or hoje.year)
+            mes = int(request.args.get('mes') or hoje.month)
+        except (ValueError, TypeError):
+            return jsonify({'erro': 'Parâmetros ano/mes inválidos.'}), 400
+
+        if not (1 <= mes <= 12):
+            return jsonify({'erro': 'Mês deve ser entre 1 e 12.'}), 400
+
+        sits_liq = SITUACOES_LIQUIDACAO
+        atual    = _resumo_mes_banco(ano,     mes, sits_liq)
+        anterior = _resumo_mes_banco(ano - 1, mes, sits_liq)
+
+        variacao = {}
+        if atual and anterior:
+            variacao = {
+                'face':           _variacao_pct(atual['face'],           anterior['face']),
+                'liquidado':      _variacao_pct(atual['liquidado'],      anterior['liquidado']),
+                'qtd_total':      _variacao_pct(atual['qtd_total'],      anterior['qtd_total']),
+                'qtd_liquidados': _variacao_pct(atual['qtd_liquidados'], anterior['qtd_liquidados']),
+            }
+
+        logger.info(f'[API/YoY] {mes:02d}/{ano} vs {mes:02d}/{ano-1} | '
+                    f'atual={"OK" if atual else "vazio"} '
+                    f'anterior={"OK" if anterior else "vazio"}')
+
+        return jsonify({
+            'atual':         atual,
+            'anterior':      anterior,
+            'variacao_pct':  variacao,
+            'tem_atual':     bool(atual),
+            'tem_anterior':  bool(anterior),
+            'mes_nome': ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio',
+                         'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro',
+                         'Novembro', 'Dezembro'][mes],
+        })
+    except Exception:
+        logger.exception('[ERRO] api_financeiro_yoy')
+        return jsonify({'erro': 'Falha ao calcular YoY.'}), 500
 
 
 @app.route('/api/financeiro/export')
@@ -1281,7 +1545,24 @@ def _executar_sync():
         _sync_lock.release()
 
 
+def _congelar_ano_anterior():
+    """Job anual (1º de Janeiro): congela o ano que acabou de fechar,
+    protegendo-o de alterações futuras (histórico para YoY)."""
+    ano_fechado = datetime.now().year - 1
+    try:
+        n = bancodados.congelar_ano(ano_fechado)
+        logger.info(f'[DB] Congelamento anual: ano {ano_fechado} protegido ({n} títulos).')
+    except Exception:
+        logger.exception('[DB] Falha ao congelar ano anterior')
+
+
 def _iniciar_scheduler():
+    # Garante que o banco existe antes de qualquer operação
+    try:
+        bancodados.init_db()
+    except Exception:
+        logger.exception('[DB] Falha ao inicializar banco')
+
     if not os.environ.get('SIPROV_USUARIO') or not os.environ.get('SIPROV_SENHA'):
         logger.warning('[SIPROV] Credenciais nao configuradas — sync automatico desativado.')
         return
@@ -1294,55 +1575,43 @@ def _iniciar_scheduler():
         return
 
     scheduler = BackgroundScheduler(daemon=True, timezone='America/Recife')
-    # Sync às 09:00 e 18:00 (America/Recife)
+    # Sync às 09:00 e 18:00 (America/Recife) — só o mês corrente é re-puxado
     scheduler.add_job(_executar_sync, 'cron', hour='9,18', minute=0, id='sync_horario')
+    # Congelamento anual: 1º de Janeiro às 02:00 — protege o ano fechado
+    scheduler.add_job(_congelar_ano_anterior, 'cron', month=1, day=1, hour=2, minute=0, id='congelar_anual')
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info('[SIPROV] Scheduler iniciado -- sync 09:00 e 18:00 (America/Recife)')
+    logger.info('[SIPROV] Scheduler iniciado -- sync 09:00 e 18:00 + congelamento anual 01/Jan')
 
-    # Startup sync: dispara em background se não há arquivo recente (< 1h)
-    padrao = os.path.join(BASE_DIR, 'data', 'dashboard_financeiro_*.json')
-    arquivos_sync = glob.glob(padrao)
-    if arquivos_sync:
-        mais_recente = max(arquivos_sync, key=os.path.getmtime)
-        idade_horas = (datetime.now().timestamp() - os.path.getmtime(mais_recente)) / 3600
-        if idade_horas < 1:
-            logger.info(f'[SIPROV] Dados recentes ({idade_horas*60:.0f}min) -- sem sync no startup.')
-            return
+    # Startup sync: dispara em background se a última sync do banco é antiga (> 1h)
+    ultima = bancodados.meta_get('ultima_sync')
+    if ultima:
+        try:
+            idade_horas = (datetime.now() - datetime.fromisoformat(ultima)).total_seconds() / 3600
+            if idade_horas < 1:
+                logger.info(f'[SIPROV] Dados recentes ({idade_horas*60:.0f}min) -- sem sync no startup.')
+                return
+        except ValueError:
+            pass
 
     logger.info('[SIPROV] Dados desatualizados — iniciando sync no startup...')
     threading.Thread(target=_executar_sync, daemon=True).start()
 
 
 # =========================================================
-# AUTO-SYNC DESATIVADO
+# AUTO-SYNC ATIVADO
 # =========================================================
-# O projeto está em modo "JSON fixo como fonte de verdade".
-# O arquivo em data/dashboard_financeiro_live.json é a única
-# base de dados. Para reativar a sync automática (startup +
-# cron 09:00/18:00), descomente a chamada abaixo.
-#
-# _iniciar_scheduler()
-logger.info('[SIPROV] Auto-sync DESATIVADO -- usando apenas JSON local como fonte de dados.')
+# Reativada: sync no startup (se dados desatualizados) +
+# scheduler cron 09:00 e 18:00 (America/Recife).
+# Para voltar ao modo JSON-only, comente a linha abaixo.
+_iniciar_scheduler()
 
 
 @app.route('/api/admin/sync', methods=['POST'])
 @login_required
 def api_admin_sync():
-    # =========================================================
-    # MODO JSON-ONLY ATIVO
-    # =========================================================
-    # O projeto está em modo "JSON fixo como fonte de verdade".
-    # Nenhuma requisição ao Siprov será feita. Para reativar a
-    # sync manual, restaure a linha abaixo:
-    #
-    # threading.Thread(target=_executar_sync, daemon=True).start()
-    # return jsonify({'status': 'sync iniciado em background'})
-    logger.warning('[SIPROV] Tentativa de sync manual bloqueada — modo JSON-only ativo.')
-    return jsonify({
-        'status': 'bloqueado',
-        'mensagem': 'Sincronização desativada. O sistema está usando o JSON local como única fonte de dados.'
-    }), 423  # 423 Locked
+    threading.Thread(target=_executar_sync, daemon=True).start()
+    return jsonify({'status': 'sync iniciado em background'})
 
 
 # =========================================================
@@ -1516,6 +1785,32 @@ def api_admin_sync_status():
         'em_andamento': em_andamento,
         'progresso': prog,
     })
+
+
+@app.route('/api/admin/db/status')
+@login_required
+def api_admin_db_status():
+    """Resumo do banco SQLite: períodos armazenados, congelados, totais."""
+    try:
+        return jsonify(bancodados.estatisticas())
+    except Exception:
+        logger.exception('[DB] Falha ao ler estatisticas')
+        return jsonify({'erro': 'Falha ao ler o banco.'}), 500
+
+
+@app.route('/api/admin/db/congelar', methods=['POST'])
+@login_required
+def api_admin_db_congelar():
+    """Congela um ano (protege de alterações). Body: {"ano": 2025}"""
+    ano = request.json.get('ano') if request.is_json else request.form.get('ano')
+    try:
+        ano = int(ano)
+    except (TypeError, ValueError):
+        return jsonify({'erro': 'Informe um ano válido (ex: 2025).'}), 400
+    n = bancodados.congelar_ano(ano)
+    # Invalida cache para refletir mudança
+    _cache['arquivo'] = None
+    return jsonify({'status': 'ok', 'ano': ano, 'titulos_congelados': n})
 
 
 # =========================================================

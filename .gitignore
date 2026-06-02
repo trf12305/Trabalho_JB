@@ -60,3 +60,4 @@ _open.py
 # Scripts auxiliares de verificacao/debug (locais, nao versionar)
 _check_*.py
 _resumo_*.py
+_test_*.py
