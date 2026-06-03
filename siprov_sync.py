@@ -623,25 +623,16 @@ def coletar_titulos(token: str) -> list[dict]:
     cache_dir = DATA_DIR / "mes_cache"
     cache_dir.mkdir(exist_ok=True)
 
-    # Fase 1 — meses que JÁ estão em cache (carrega rápido, sem rede)
+    # Fase 1 — CACHE DE DISCO DESATIVADO.
+    # O cache mensal (data/mes_cache/) vivia no filesystem, que no Railway
+    # é EFÊMERO: sumia/corrompia entre deploys e fazia a sync gravar dados
+    # PARCIAIS por cima do banco (ex: Abril caiu de 17.217 -> 8 títulos).
+    # Agora a persistência é o próprio banco (SQLite/Postgres), então
+    # SEMPRE baixamos todos os meses frescos do Siprov. Cada mês completo
+    # substitui seu período no banco (replace-por-mês), sem risco de
+    # gravar dado parcial.
     todos = []
-    meses_a_buscar = []
-    for ano, mes in meses:
-        cache_file = cache_dir / f"{ano}_{mes:02d}.json"
-        mes_passado = (ano, mes) < (hoje.year, hoje.month)
-        idade_max_horas = 24 * 30 if mes_passado else 1
-        if cache_file.exists():
-            idade_h = (datetime.now().timestamp() - cache_file.stat().st_mtime) / 3600
-            if idade_h < idade_max_horas:
-                try:
-                    with open(cache_file, encoding="utf-8") as f:
-                        itens_cache = json.load(f)
-                    log.info(f"  Cache {mes:02d}/{ano}: {len(itens_cache)} títulos (idade {idade_h:.1f}h)")
-                    todos.extend(itens_cache)
-                    continue
-                except Exception as e:
-                    log.warning(f"  Cache {mes:02d}/{ano} corrompido ({e}), refazendo")
-        meses_a_buscar.append((ano, mes))
+    meses_a_buscar = list(meses)
 
     _set(titulos_atual=len(todos),
          mensagem=f"Cache carregado: {len(todos)} títulos. {len(meses_a_buscar)} meses a buscar.")
