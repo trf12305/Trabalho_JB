@@ -1527,20 +1527,66 @@ def logout():
 _sync_lock = threading.Lock()
 
 
-def _executar_sync():
+def _ha_internet(host='acesso.siprov.com.br', porta=443, timeout=5):
+    """Testa se o Siprov é alcançável (DNS + conexão). Usado para o retry
+    pós-boot, quando o Wi-Fi pode ainda não ter subido."""
+    import socket
+    try:
+        socket.create_connection((host, porta), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
+def _executar_sync(max_retries=10, retry_delay=120):
+    """Executa a sync. Se falhar por REDE (sem internet, comum logo após o
+    boot), aguarda e tenta de novo — até max_retries vezes, com retry_delay
+    segundos entre tentativas. Falhas que não são de rede não fazem retry."""
     if not _sync_lock.acquire(blocking=False):
         logger.info('[SIPROV] Sync ja em andamento, ignorando.')
         return
+
+    import time as _time
     try:
         from siprov_sync import sincronizar
-        sincronizar()
-        _cache['dados_brutos']      = None
-        _cache['dados_processados'] = None
-        _cache['dados_eventos']     = None
-        _cache['dados_vendas']      = None
-        logger.info('[SIPROV] Cache invalidado apos sync.')
-    except Exception:
-        logger.exception('[SIPROV] Falha na sincronizacao automatica')
+        for tentativa in range(1, max_retries + 1):
+            # Espera a rede ficar disponível (Wi-Fi pode demorar a subir no boot)
+            if not _ha_internet():
+                if tentativa < max_retries:
+                    logger.warning(
+                        f'[SIPROV] Sem internet (tentativa {tentativa}/{max_retries}). '
+                        f'Aguardando {retry_delay}s para tentar de novo...'
+                    )
+                    _time.sleep(retry_delay)
+                    continue
+                else:
+                    logger.error('[SIPROV] Sem internet apos todas as tentativas. Sync abortada.')
+                    return
+            # Há internet → executa a sync
+            try:
+                sincronizar()
+                _cache['dados_brutos']      = None
+                _cache['dados_processados'] = None
+                _cache['dados_eventos']     = None
+                _cache['dados_vendas']      = None
+                logger.info('[SIPROV] Cache invalidado apos sync.')
+                return  # sucesso
+            except Exception as e:
+                # Erro de rede no meio da sync → retry; outros erros → aborta
+                msg = str(e).lower()
+                eh_rede = any(k in msg for k in (
+                    'resolve', 'getaddrinfo', 'connection', 'timed out',
+                    'timeout', 'max retries', 'network', 'unreachable',
+                ))
+                if eh_rede and tentativa < max_retries:
+                    logger.warning(
+                        f'[SIPROV] Falha de rede na sync (tentativa {tentativa}/{max_retries}): '
+                        f'{str(e)[:120]}. Retry em {retry_delay}s...'
+                    )
+                    _time.sleep(retry_delay)
+                    continue
+                logger.exception('[SIPROV] Falha na sincronizacao automatica')
+                return
     finally:
         _sync_lock.release()
 
@@ -1575,10 +1621,16 @@ def _iniciar_scheduler():
         return
 
     scheduler = BackgroundScheduler(daemon=True, timezone='America/Recife')
+    # misfire_grace_time=3600: se o serviço estava down no horário (ex: PC
+    # ligou 09:58 e perdeu as 09:00), roda o job atrasado assim que voltar,
+    # desde que dentro de 1h. coalesce=True: junta execuções perdidas em 1.
+    _job_defaults = {'misfire_grace_time': 3600, 'coalesce': True}
     # Sync às 09:00 e 18:00 (America/Recife) — só o mês corrente é re-puxado
-    scheduler.add_job(_executar_sync, 'cron', hour='9,18', minute=0, id='sync_horario')
+    scheduler.add_job(_executar_sync, 'cron', hour='9,18', minute=0,
+                      id='sync_horario', **_job_defaults)
     # Congelamento anual: 1º de Janeiro às 02:00 — protege o ano fechado
-    scheduler.add_job(_congelar_ano_anterior, 'cron', month=1, day=1, hour=2, minute=0, id='congelar_anual')
+    scheduler.add_job(_congelar_ano_anterior, 'cron', month=1, day=1, hour=2, minute=0,
+                      id='congelar_anual', **_job_defaults)
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
     logger.info('[SIPROV] Scheduler iniciado -- sync 09:00 e 18:00 + congelamento anual 01/Jan')
