@@ -61,6 +61,8 @@ _open.py
 _check_*.py
 _resumo_*.py
 _test_*.py
+_fix_*.py
+_verifica_*.py
 
 # Servico Windows: binario NSSM, logs e zip (mantem so os .bat)
 _servico/nssm.exe
