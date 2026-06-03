@@ -1691,6 +1691,12 @@ def admin_debug():
         'FLASK_ENV': os.environ.get('FLASK_ENV'),
         'PORT': os.environ.get('PORT'),
         'RAILWAY_ENV': {k: v for k, v in os.environ.items() if 'RAILWAY' in k},
+        # Diagnóstico do banco (mascarado por segurança)
+        'banco_ativo': 'PostgreSQL' if bancodados.USE_POSTGRES else 'SQLite',
+        'tem_DATABASE_URL': bool(os.environ.get('DATABASE_URL')),
+        'database_url_prefixo': (os.environ.get('DATABASE_URL', '')[:25] + '...') if os.environ.get('DATABASE_URL') else None,
+        'vars_banco': sorted([k for k in os.environ if any(
+            t in k.upper() for t in ('DATABASE', 'PG', 'POSTGRES'))]),
     }
     data_dir = os.path.join(BASE_DIR, 'data')
     info['data_dir'] = data_dir
