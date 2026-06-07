@@ -437,8 +437,8 @@ def _dedup_key(item: dict) -> str:
 
 
 def _solicitar_relatorio(token: str, tipo_lancamento: str,
-                          situacoes: list[str], di: str, df: str,
-                          filtro_data: str = "vencimento") -> int | None:
+        situacoes: list[str], di: str, df: str,
+        filtro_data: str = "vencimento") -> int | None:
     """
     Solicita a geração assíncrona de um relatório financeiro.
 
@@ -472,7 +472,7 @@ def _solicitar_relatorio(token: str, tipo_lancamento: str,
             body["codLoja"] = [SIPROV_COD_LOJA]
 
     log.info(f"    POST /ext/relatorio/financeiro "
-             f"tipo={tipo_lancamento} filtro={filtro_data} sits={situacoes} {di}→{df}")
+            f"tipo={tipo_lancamento} filtro={filtro_data} sits={situacoes} {di}→{df}")
     data = _post(token, "/ext/relatorio/financeiro", body, timeout=(15, 60))
     if not isinstance(data, dict):
         log.error(f"    Resposta inesperada do POST relatório: {type(data)}")
@@ -481,12 +481,12 @@ def _solicitar_relatorio(token: str, tipo_lancamento: str,
     situacao = data.get("situacao", "?")
     mensagem = data.get("mensagem", "")
     log.info(f"    Relatório solicitado: cod={cod}, situacao={situacao}"
-             + (f", msg={mensagem}" if mensagem else ""))
+            + (f", msg={mensagem}" if mensagem else ""))
     return cod
 
 
 def _aguardar_relatorio(token: str, cod_relatorio: int,
-                         timeout_s: int = 1200) -> bool:
+                        timeout_s: int = 1200) -> bool:
     """
     Aguarda o relatório ficar pronto via OPTIONS /ext/relatorio/financeiro/{cod}.
 
@@ -559,12 +559,12 @@ def coletar_titulos(token: str) -> list[dict]:
     Coleta os títulos financeiros via relatório assíncrono, fatiando por mês.
 
     Estratégia de janela:
-      - Se SIPROV_DATA_INICIAL setada (YYYY-MM-DD): puxa do mês dessa data até o
+    - Se SIPROV_DATA_INICIAL setada (YYYY-MM-DD): puxa do mês dessa data até o
         mês de SIPROV_DATA_FINAL (ou hoje+SIPROV_MESES_FUTUROS, default 6 meses).
-      - Senão: puxa SIPROV_MESES_BACK meses para trás a partir de hoje (default 3).
+    - Senão: puxa SIPROV_MESES_BACK meses para trás a partir de hoje (default 3).
     """
     log.info("Coletando títulos financeiros via /ext/relatorio/financeiro "
-             "(tipos=CREDITO+DEBITO, situacoes=Aberto+Pendente+Liquidado)...")
+            "(tipos=CREDITO+DEBITO, situacoes=Aberto+Pendente+Liquidado)...")
 
     hoje = date.today()
     data_ini_str = os.environ.get("SIPROV_DATA_INICIAL", "").strip()
@@ -587,7 +587,7 @@ def coletar_titulos(token: str) -> list[dict]:
                 for _ in range(meses_futuros):
                     df = df.replace(day=1)
                     df = (df.replace(month=12, day=1) if df.month == 1
-                          else df.replace(month=df.month, day=1))
+                        else df.replace(month=df.month, day=1))
                     # avança 1 mês manualmente
                     if df.month == 12:
                         df = df.replace(year=df.year + 1, month=1)
@@ -632,10 +632,18 @@ def coletar_titulos(token: str) -> list[dict]:
     # substitui seu período no banco (replace-por-mês), sem risco de
     # gravar dado parcial.
     todos = []
-    meses_a_buscar = list(meses)
+    # Pula meses já CONGELADOS (fechados) — não re-baixa do Siprov. O sync
+    # busca apenas o(s) mês(es) VIVO(s) (mês corrente + não fechados). Quando
+    # um mês é congelado no fechamento mensal, ele sai automaticamente daqui.
+    import db as _db
+    meses_a_buscar = [(a, m) for (a, m) in meses if not _db.is_congelado(a, m)]
+    _pulados = [f"{m:02d}/{a}" for (a, m) in meses if _db.is_congelado(a, m)]
+    if _pulados:
+        log.info(f"  Meses CONGELADOS pulados (nao re-baixados): {_pulados}")
+    log.info(f"  Meses a buscar (vivos): {[f'{m:02d}/{a}' for (a, m) in meses_a_buscar]}")
 
     _set(titulos_atual=len(todos),
-         mensagem=f"Cache carregado: {len(todos)} títulos. {len(meses_a_buscar)} meses a buscar.")
+        mensagem=f"{len(meses_a_buscar)} mes(es) vivo(s) a buscar.")
 
     # Fase 2 — buscar meses faltantes em PARALELO
     if meses_a_buscar:
@@ -662,7 +670,7 @@ def coletar_titulos(token: str) -> list[dict]:
         ]
         log.info(f"  Situações: {situacoes} | Tipos: {tipos}")
         log.info(f"  Estratégia: solicitar {len(meses_a_buscar)*len(tipos)} relatórios "
-                 f"de uma vez, depois aguardar e baixar em paralelo.")
+                f"de uma vez, depois aguardar e baixar em paralelo.")
 
         # ── Fase 2a: solicita TODOS os relatórios de uma vez ──────────────────
         # Fusão vencimento + liquidacao: para cada mês/tipo, 2 relatórios são solicitados.
@@ -701,7 +709,7 @@ def coletar_titulos(token: str) -> list[dict]:
                 try:
                     data = _options(token, f"/ext/relatorio/financeiro/{cod}")
                     sit = (data.get("situacao", "PENDENTE") if data
-                           else "PENDENTE").upper()
+                        else "PENDENTE").upper()
                     decorrido = int(time.time() - t_inicio)
                     ano, mes, tipo, filtro_data = chave
                     log.info(f"  [{decorrido}s] {mes:02d}/{ano} {tipo}/{filtro_data} cod={cod}: {sit}")
@@ -732,7 +740,7 @@ def coletar_titulos(token: str) -> list[dict]:
                         with lock:
                             todos.extend(itens)
                             _set(titulos_atual=len(todos),
-                                 mensagem=f"{len(todos)} títulos (baixando…)")
+                                mensagem=f"{len(todos)} títulos (baixando…)")
                         _atualizar_dashboard_live(todos, None, lock)
                     except Exception as e:
                         log.error(f"  Erro ao baixar {mes:02d}/{ano} {tipo}/{filtro_data}: {e}")
@@ -746,7 +754,7 @@ def coletar_titulos(token: str) -> list[dict]:
             for chave, cod in pendentes.items():
                 ano, mes, tipo, filtro_data = chave
                 log.error(f"  Timeout global ({TIMEOUT_GLOBAL}s): "
-                          f"{mes:02d}/{ano} {tipo}/{filtro_data} cod={cod} nunca finalizou")
+                f"{mes:02d}/{ano} {tipo}/{filtro_data} cod={cod} nunca finalizou")
 
     # Deduplicação final DESATIVADA. A fusão vencimento+liquidacao está
     # desligada (filtros_data=["vencimento"]) e cada relatório é de um mês
@@ -757,10 +765,6 @@ def coletar_titulos(token: str) -> list[dict]:
     _set(titulos_total=len(todos))
     return todos
 
-
-# ─────────────────────────────────────────────
-#  COLETA — ASSOCIADOS (para enriquecer)
-# ─────────────────────────────────────────────
 
 def coletar_associados(token: str) -> dict:
     """

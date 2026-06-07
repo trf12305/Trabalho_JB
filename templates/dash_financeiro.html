@@ -128,23 +128,14 @@
 
 <!-- LOGO JB PROTEÇÃO -->
 <div style="margin:0 0 12px;text-align:center;">
-  <div style="display:inline-flex;align-items:center;gap:16px;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(251,146,60,.05));border:1px solid rgba(249,115,22,.22);border-radius:22px;padding:14px 30px;box-shadow:0 0 50px rgba(249,115,22,.1),0 4px 24px rgba(0,0,0,.3);">
-    <svg width="44" height="48" viewBox="0 0 44 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="jbshield" x1="22" y1="0" x2="22" y2="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#fb923c"/>
-          <stop offset="100%" stop-color="#b45309"/>
-        </linearGradient>
-        <filter id="jbglow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-      </defs>
-      <path filter="url(#jbglow)" d="M22 2L3 10v14c0 13 8.5 24.5 19 27 10.5-2.5 19-14 19-27V10L22 2z" fill="url(#jbshield)"/>
-      <text x="22" y="29" font-family="Arial Black,sans-serif" font-size="13" font-weight="900" fill="white" text-anchor="middle" letter-spacing="-0.5">JB</text>
-    </svg>
+  <div style="display:inline-flex;align-items:center;gap:24px;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(251,146,60,.05));border:1px solid rgba(249,115,22,.22);border-radius:24px;padding:16px 36px;box-shadow:0 0 50px rgba(249,115,22,.1),0 4px 24px rgba(0,0,0,.3);">
+    <img src="/static/img/logo_jb_trim.png" alt="JB Proteção Patrimonial" style="height:78px;width:auto;border-radius:14px;display:block;box-shadow:0 6px 22px rgba(0,0,0,.45);">
     <div style="text-align:left;">
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:26px;font-weight:900;line-height:1;letter-spacing:-0.5px;">
-        <span style="background:linear-gradient(90deg,#fb923c,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">JB</span><span style="color:rgba(255,255,255,.95);margin-left:8px;">PROTEÇÃO</span>
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:31px;font-weight:900;line-height:1.02;letter-spacing:-0.5px;">
+        <span style="background:linear-gradient(90deg,#fb923c,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">JB</span><span style="color:rgba(255,255,255,.96);margin-left:9px;">PROTEÇÃO</span>
       </div>
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:9px;letter-spacing:.38em;color:rgba(148,163,184,.7);font-weight:700;text-transform:uppercase;margin-top:5px;">
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:24px;font-weight:800;letter-spacing:.05em;color:rgba(255,255,255,.94);line-height:1.06;margin-top:1px;">PATRIMONIAL</div>
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:9px;letter-spacing:.34em;color:rgba(148,163,184,.7);font-weight:700;text-transform:uppercase;margin-top:8px;">
         Plataforma de Gestão Comercial
       </div>
     </div>
@@ -1314,7 +1305,6 @@ async function atualizarYoY(periodo) {
 }
 
 function renderYoYIndicator(yoy) {
-    // Atualiza o card MoM/YoY existente com dados YoY reais
     const el = document.querySelector('[data-card="mom-yoy"], #card-mom-yoy');
     if (!el) return;
     if (!yoy.tem_anterior) {
@@ -1333,9 +1323,6 @@ function renderYoYIndicator(yoy) {
     }
 }
 
-// =========================================================
-// FILTROS DA TABELA
-// =========================================================
 
 function filtrarTabela() {
     const texto    = (document.getElementById('filtroPesquisa').value  || '').toLowerCase().trim();
@@ -1349,7 +1336,6 @@ function filtrarTabela() {
     });
     renderTabela(filtrado);
 }
-// Debounce de 280ms para filtros de texto
 let _filterDebounce = null;
 function _debounceFiltro() {
     clearTimeout(_filterDebounce);
@@ -1358,7 +1344,6 @@ function _debounceFiltro() {
 document.getElementById('filtroPesquisa').addEventListener('input', _debounceFiltro);
 document.getElementById('filtroConsultor').addEventListener('input', _debounceFiltro);
 document.getElementById('filtroSituacao').addEventListener('change', filtrarTabela);
-// Enter para aplicar filtro imediatamente
 ['filtroPesquisa', 'filtroConsultor'].forEach(id => {
     document.getElementById(id).addEventListener('keydown', e => {
         if (e.key === 'Enter') {
@@ -1374,9 +1359,6 @@ document.getElementById('btn-limpar-filtros').addEventListener('click', () => {
     document.getElementById('filtroConsultor').value = '';
     renderTabela();
 });
-// =========================================================
-// EXPORTAR CSV
-// =========================================================
 function exportarCSV() {
     const params = new URLSearchParams({
         tipo:         filtroTipo,
@@ -1389,9 +1371,6 @@ function exportarCSV() {
     window.location.href = '/api/financeiro/export?' + params.toString();
 }
 document.getElementById('btn-exportar').addEventListener('click', exportarCSV);
-// =========================================================
-// AUTO-REFRESH
-// =========================================================
 let _arInterval  = null;
 let _arCountdown = 0;
 const AR_SEGUNDOS = 300;

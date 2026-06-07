@@ -64,6 +64,12 @@
             -webkit-text-fill-color: transparent;
         }
 
+        .title-gradient {
+            background: linear-gradient(to right, #fff, #f97316);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
         .minimal-input {
             background: rgba(15, 23, 42, .72);
             border: 1px solid rgba(255, 255, 255, .06);
@@ -104,23 +110,14 @@
 
 <!-- LOGO JB PROTEÇÃO -->
 <div style="margin:16px 20px 0;text-align:center;">
-  <div style="display:inline-flex;align-items:center;gap:16px;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(251,146,60,.05));border:1px solid rgba(249,115,22,.22);border-radius:22px;padding:14px 30px;box-shadow:0 0 50px rgba(249,115,22,.1),0 4px 24px rgba(0,0,0,.3);">
-    <svg width="44" height="48" viewBox="0 0 44 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="jbshield" x1="22" y1="0" x2="22" y2="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#fb923c"/>
-          <stop offset="100%" stop-color="#b45309"/>
-        </linearGradient>
-        <filter id="jbglow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-      </defs>
-      <path filter="url(#jbglow)" d="M22 2L3 10v14c0 13 8.5 24.5 19 27 10.5-2.5 19-14 19-27V10L22 2z" fill="url(#jbshield)"/>
-      <text x="22" y="29" font-family="Arial Black,sans-serif" font-size="13" font-weight="900" fill="white" text-anchor="middle" letter-spacing="-0.5">JB</text>
-    </svg>
+  <div style="display:inline-flex;align-items:center;gap:24px;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(251,146,60,.05));border:1px solid rgba(249,115,22,.22);border-radius:24px;padding:16px 36px;box-shadow:0 0 50px rgba(249,115,22,.1),0 4px 24px rgba(0,0,0,.3);">
+    <img src="/static/img/logo_jb_trim.png" alt="JB Proteção Patrimonial" style="height:78px;width:auto;border-radius:14px;display:block;box-shadow:0 6px 22px rgba(0,0,0,.45);">
     <div style="text-align:left;">
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:26px;font-weight:900;line-height:1;letter-spacing:-0.5px;">
-        <span style="background:linear-gradient(90deg,#fb923c,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">JB</span><span style="color:rgba(255,255,255,.95);margin-left:8px;">PROTEÇÃO</span>
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:31px;font-weight:900;line-height:1.02;letter-spacing:-0.5px;">
+        <span style="background:linear-gradient(90deg,#fb923c,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">JB</span><span style="color:rgba(255,255,255,.96);margin-left:9px;">PROTEÇÃO</span>
       </div>
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:9px;letter-spacing:.38em;color:rgba(148,163,184,.7);font-weight:700;text-transform:uppercase;margin-top:5px;">
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:24px;font-weight:800;letter-spacing:.05em;color:rgba(255,255,255,.94);line-height:1.06;margin-top:1px;">PATRIMONIAL</div>
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:9px;letter-spacing:.34em;color:rgba(148,163,184,.7);font-weight:700;text-transform:uppercase;margin-top:8px;">
         Plataforma de Gestão Comercial
       </div>
     </div>
@@ -159,104 +156,91 @@
 
 <main class="p-5 lg:p-7">
 
-    <!-- HEADER -->
-    <header class="glass rounded-[28px] px-6 lg:px-8 py-6 mb-6">
+    <!-- HEADER (layout igual ao Financeiro) -->
+    <header class="mb-5 relative z-50">
 
-        <div class="flex flex-col xl:flex-row justify-between xl:items-center gap-6">
+        <div class="glass p-4 flex items-center justify-between flex-wrap gap-4">
 
-            <div>
-                <p class="uppercase tracking-[0.35em] text-orange-400 text-[10px] font-bold mb-3">
-                    DASHBOARD EXECUTIVO
-                </p>
-                <h1 class="text-4xl lg:text-5xl font-black tracking-tight leading-none">
-                    Eventos
-                </h1>
-                <p class="text-slate-400 mt-4 max-w-2xl text-sm leading-relaxed">
-                    Controle de adesões, ritmo comercial, eficiência de cobrança
-                    e performance operacional por período.
-                </p>
+            <div class="flex items-center gap-4">
+                <div class="w-11 h-11 rounded-xl bg-orange-500 flex items-center justify-center font-black text-black">
+                    JB
+                </div>
+                <div>
+                    <h1 class="text-2xl font-black uppercase title-gradient tracking-tight">
+                        Eventos
+                    </h1>
+                    <p class="text-[10px] uppercase tracking-[3px] text-slate-500 font-bold">
+                        Dashboard de Eventos · Ritmo Comercial
+                    </p>
+                </div>
             </div>
 
-            <div class="flex gap-2 flex-wrap">
-                <button
-                    id="btn-atualizar"
-                    class="minimal-btn text-white px-5 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-orange-500/10 flex items-center gap-3">
-                    <span class="text-lg">⬆</span>
+            <div class="flex flex-wrap gap-3 items-end">
+
+                <!-- BASES -->
+                <div class="relative">
+                    <button
+                        id="btn-base"
+                        class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold">
+                        Bases
+                    </button>
+                    <div
+                        id="menu-base"
+                        class="hidden absolute left-0 top-full mt-2 w-64 bg-slate-900 border border-white/10 rounded-lg p-2 max-h-64 overflow-auto shadow-2xl z-[9999]">
+                        <label class="flex gap-2 text-xs mb-2">
+                            <input type="checkbox" value="ALL" checked id="base-all">
+                            Todas
+                        </label>
+                        <div id="base-list"></div>
+                    </div>
+                </div>
+
+                <!-- SELETOR DE PERÍODO RÁPIDO -->
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-400 mb-1 font-bold">Período</label>
+                    <div class="flex gap-1 flex-wrap">
+                        <button data-periodo="mes-atual"    class="btn-periodo bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-2 rounded-lg text-[10px] font-bold transition-all">Este Mês</button>
+                        <button data-periodo="mes-anterior" class="btn-periodo bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-2 rounded-lg text-[10px] font-bold transition-all">Mês Anterior</button>
+                        <button data-periodo="ultimos-3"    class="btn-periodo bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-2 rounded-lg text-[10px] font-bold transition-all">Últimos 3M</button>
+                        <button data-periodo="ano-atual"    class="btn-periodo bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-2 rounded-lg text-[10px] font-bold transition-all">Este Ano</button>
+                        <button data-periodo="ano-anterior" class="btn-periodo bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-2 rounded-lg text-[10px] font-bold transition-all">Ano Passado</button>
+                        <button data-periodo="limpar"       class="btn-periodo bg-slate-800 hover:bg-slate-700 text-orange-400 px-2.5 py-2 rounded-lg text-[10px] font-bold transition-all">✕ Limpar</button>
+                    </div>
+                </div>
+
+                <!-- DATA INICIAL -->
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-400 mb-1 font-bold">Data Inicial</label>
+                    <input id="filtro-data-inicial" type="date" class="bg-slate-800 text-xs p-2 rounded-lg">
+                </div>
+
+                <!-- DATA FINAL -->
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-400 mb-1 font-bold">Data Final</label>
+                    <input id="filtro-data-final" type="date" class="bg-slate-800 text-xs p-2 rounded-lg">
+                </div>
+
+                <!-- BOTÕES -->
+                <button id="btn-atualizar" class="bg-slate-800 hover:bg-slate-700 text-white px-5 py-3 rounded-2xl font-bold text-sm flex items-center gap-3">
                     Atualizar
                 </button>
-                <button
-                    id="btn-exportar"
-                    class="px-5 py-3 rounded-2xl font-bold text-sm text-white"
-                    style="background:rgba(30,41,59,.8); border:1px solid rgba(255,255,255,.06);"
-                    title="Exportar adesões filtradas como CSV">
+                <button id="btn-exportar" class="bg-slate-800 hover:bg-slate-700 text-white px-5 py-3 rounded-2xl font-bold text-sm" title="Exportar adesões filtradas como CSV">
                     Exportar CSV
                 </button>
-                <button
-                    id="btn-auto-refresh"
-                    class="px-5 py-3 rounded-2xl font-bold text-sm text-white"
-                    style="background:rgba(30,41,59,.8); border:1px solid rgba(255,255,255,.06);"
-                    title="Atualizar automaticamente a cada 5 minutos">
+                <button id="btn-auto-refresh" class="bg-slate-800 hover:bg-slate-700 text-white px-5 py-3 rounded-2xl font-bold text-sm" title="Atualizar automaticamente a cada 5 minutos">
                     Auto-Refresh
                 </button>
-                <button
-                    id="btn-sync-siprov"
-                    class="px-5 py-3 rounded-2xl font-bold text-sm text-white flex items-center gap-2"
-                    style="background:#ea580c;"
-                    title="Forçar sincronização com a API Siprov agora">
+                <button id="btn-sync-siprov" class="bg-orange-600 hover:bg-orange-500 text-white px-5 py-3 rounded-2xl font-bold text-sm flex items-center gap-2" title="Forçar sincronização com a API Siprov agora">
                     <span id="sync-icon">⟳</span>
                     <span id="sync-label">Sync Siprov</span>
                 </button>
+
             </div>
 
         </div>
 
         <div class="mt-3 text-xs text-slate-400 flex items-center gap-3" id="sync-status-bar">
             <span id="sync-status-text">Carregando estado da sincronização…</span>
-        </div>
-
-        <!-- FILTROS -->
-        <div class="flex flex-wrap gap-4 items-end mt-5 pt-5 border-t border-white/5">
-
-            <!-- BASES -->
-            <div class="relative">
-                <button
-                    id="btn-base"
-                    class="minimal-input px-3 py-2 text-xs font-bold cursor-pointer">
-                    Bases
-                </button>
-                <div
-                    id="menu-base"
-                    class="hidden absolute left-0 top-full mt-2 w-64 bg-slate-900 border border-white/10 rounded-xl p-2 max-h-64 overflow-auto shadow-2xl z-[9999]">
-                    <label class="flex gap-2 text-xs mb-2">
-                        <input type="checkbox" id="base-all" value="ALL" checked>
-                        Todas
-                    </label>
-                    <div id="base-list"></div>
-                </div>
-            </div>
-
-            <!-- DATA INICIAL -->
-            <div class="flex flex-col">
-                <label class="text-[10px] text-slate-400 mb-1 font-bold uppercase tracking-widest">
-                    Data Inicial (Adesão)
-                </label>
-                <input
-                    id="filtro-data-inicial"
-                    type="date"
-                    class="minimal-input text-xs px-3 py-2">
-            </div>
-
-            <!-- DATA FINAL -->
-            <div class="flex flex-col">
-                <label class="text-[10px] text-slate-400 mb-1 font-bold uppercase tracking-widest">
-                    Data Final (Adesão)
-                </label>
-                <input
-                    id="filtro-data-final"
-                    type="date"
-                    class="minimal-input text-xs px-3 py-2">
-            </div>
-
         </div>
 
     </header>
@@ -814,6 +798,45 @@ document.getElementById('filtro-data-final').addEventListener('change', e => {
 
 // Meta input: recalcula ritmo localmente, sem chamar a API
 document.getElementById('meta-input').addEventListener('input', recalcularRitmo);
+
+// =========================================================
+// SELETOR DE PERÍODO RÁPIDO (igual ao Financeiro)
+// =========================================================
+function fmtDateInput(d) { return d.toISOString().slice(0, 10); }
+
+function setPeriodo(periodo) {
+    const hoje = new Date();
+    const ano  = hoje.getFullYear();
+    const mes  = hoje.getMonth();   // 0-11
+    let di = null, df = null;
+    switch (periodo) {
+        case 'mes-atual':    di = new Date(ano, mes, 1);     df = new Date(ano, mes + 1, 0); break;
+        case 'mes-anterior': di = new Date(ano, mes - 1, 1); df = new Date(ano, mes, 0);     break;
+        case 'ultimos-3':    di = new Date(ano, mes - 2, 1); df = new Date(ano, mes + 1, 0); break;
+        case 'ano-atual':    di = new Date(ano, 0, 1);       df = new Date(ano, 11, 31);     break;
+        case 'ano-anterior': di = new Date(ano - 1, 0, 1);   df = new Date(ano - 1, 11, 31); break;
+        case 'limpar':       di = null; df = null; break;
+    }
+    filtroDataInicial = di ? fmtDateInput(di) : null;
+    filtroDataFinal   = df ? fmtDateInput(df) : null;
+    document.getElementById('filtro-data-inicial').value = filtroDataInicial || '';
+    document.getElementById('filtro-data-final').value   = filtroDataFinal   || '';
+
+    document.querySelectorAll('.btn-periodo').forEach(b => {
+        b.classList.remove('bg-orange-500', 'text-black');
+        b.classList.add('bg-slate-800', 'text-white');
+    });
+    const btn = document.querySelector(`.btn-periodo[data-periodo="${periodo}"]`);
+    if (btn && periodo !== 'limpar') {
+        btn.classList.remove('bg-slate-800', 'text-white');
+        btn.classList.add('bg-orange-500', 'text-black');
+    }
+    carregarDados();
+}
+
+document.querySelectorAll('.btn-periodo').forEach(btn => {
+    btn.addEventListener('click', () => setPeriodo(btn.dataset.periodo));
+});
 
 // =========================================================
 // EXPORTAR CSV

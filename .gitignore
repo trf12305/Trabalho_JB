@@ -64,6 +64,12 @@ _test_*.py
 _fix_*.py
 _verifica_*.py
 
+# Scripts/artefatos temporarios locais (probes, resumes, preview, monitores).
+# Nenhum modulo real do projeto comeca com "_".
+_*.py
+_*.ps1
+_*.json
+
 # Servico Windows: binario NSSM, logs e zip (mantem so os .bat)
 _servico/nssm.exe
 _servico/nssm-*/

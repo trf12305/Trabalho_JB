@@ -9,22 +9,35 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
         rel="stylesheet"
     />
 
     <style>
+        * { font-family: 'Inter', sans-serif; }
+
         body {
-            background-color: #0B1120;
-            color: #F8FAFC;
+            background:
+                radial-gradient(circle at top left, rgba(249,115,22,0.15), transparent 30%),
+                linear-gradient(to bottom, #020617, #0f172a);
+            color: #e2e8f0;
+            min-height: 100vh;
             font-family: 'Inter', sans-serif;
         }
 
+        .glass {
+            background: rgba(15,23,42,0.75);
+            border: 1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(14px);
+            border-radius: 20px;
+        }
+
         .card {
-            background-color: #1E293B;
-            border-radius: 12px;
+            background: rgba(15,23,42,0.75);
+            border: 1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(14px);
+            border-radius: 18px;
             padding: 20px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             transition: transform 0.2s;
         }
 
@@ -41,10 +54,22 @@
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
 
         .kpi-card {
-            background: rgba(30, 41, 59, 0.4);
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(71, 85, 105, 0.3);
-            border-radius: 1rem;
+            background: rgba(15,23,42,0.75);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 18px;
+        }
+
+        .kpi-value {
+            font-size: 1.7rem;
+            font-weight: 900;
+            letter-spacing: -1px;
+        }
+
+        .title-gradient {
+            background: linear-gradient(to right, #fff, #f97316);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
         .filter-input {
@@ -68,23 +93,14 @@
 
 <!-- LOGO JB PROTEÇÃO -->
 <div style="margin:0 0 12px;text-align:center;">
-  <div style="display:inline-flex;align-items:center;gap:16px;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(251,146,60,.05));border:1px solid rgba(249,115,22,.22);border-radius:22px;padding:14px 30px;box-shadow:0 0 50px rgba(249,115,22,.1),0 4px 24px rgba(0,0,0,.3);">
-    <svg width="44" height="48" viewBox="0 0 44 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="jbshield" x1="22" y1="0" x2="22" y2="48" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stop-color="#fb923c"/>
-          <stop offset="100%" stop-color="#b45309"/>
-        </linearGradient>
-        <filter id="jbglow"><feGaussianBlur stdDeviation="2" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-      </defs>
-      <path filter="url(#jbglow)" d="M22 2L3 10v14c0 13 8.5 24.5 19 27 10.5-2.5 19-14 19-27V10L22 2z" fill="url(#jbshield)"/>
-      <text x="22" y="29" font-family="Arial Black,sans-serif" font-size="13" font-weight="900" fill="white" text-anchor="middle" letter-spacing="-0.5">JB</text>
-    </svg>
+  <div style="display:inline-flex;align-items:center;gap:24px;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(251,146,60,.05));border:1px solid rgba(249,115,22,.22);border-radius:24px;padding:16px 36px;box-shadow:0 0 50px rgba(249,115,22,.1),0 4px 24px rgba(0,0,0,.3);">
+    <img src="/static/img/logo_jb_trim.png" alt="JB Proteção Patrimonial" style="height:78px;width:auto;border-radius:14px;display:block;box-shadow:0 6px 22px rgba(0,0,0,.45);">
     <div style="text-align:left;">
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:26px;font-weight:900;line-height:1;letter-spacing:-0.5px;">
-        <span style="background:linear-gradient(90deg,#fb923c,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">JB</span><span style="color:rgba(255,255,255,.95);margin-left:8px;">PROTEÇÃO</span>
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:31px;font-weight:900;line-height:1.02;letter-spacing:-0.5px;">
+        <span style="background:linear-gradient(90deg,#fb923c,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">JB</span><span style="color:rgba(255,255,255,.96);margin-left:9px;">PROTEÇÃO</span>
       </div>
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:9px;letter-spacing:.38em;color:rgba(148,163,184,.7);font-weight:700;text-transform:uppercase;margin-top:5px;">
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:24px;font-weight:800;letter-spacing:.05em;color:rgba(255,255,255,.94);line-height:1.06;margin-top:1px;">PATRIMONIAL</div>
+      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:9px;letter-spacing:.34em;color:rgba(148,163,184,.7);font-weight:700;text-transform:uppercase;margin-top:8px;">
         Plataforma de Gestão Comercial
       </div>
     </div>
@@ -127,15 +143,15 @@
     <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
 
         <div class="flex items-center gap-4">
-            <div class="w-12 h-12 rounded bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center font-bold text-xl text-white shadow-lg shadow-orange-500/30">
+            <div class="w-11 h-11 rounded-xl bg-orange-500 flex items-center justify-center font-black text-black">
                 JB
             </div>
             <div>
-                <h1 class="text-2xl font-bold text-white tracking-tight">
+                <h1 class="text-2xl font-black uppercase title-gradient tracking-tight">
                     Dashboard Executivo
                 </h1>
-                <p class="text-sm text-gray-400 mt-1">
-                    Vendas · Base atualizada
+                <p class="text-[10px] uppercase tracking-[3px] text-slate-500 font-bold mt-1">
+                    Vendas · Base Atualizada
                 </p>
             </div>
         </div>
@@ -171,7 +187,7 @@
         <!-- DATA INICIAL -->
         <div class="flex flex-col gap-1">
             <label class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">
-                Emissão Inicial
+                Adesão Inicial
             </label>
             <input
                 id="filtro-data-inicial"
@@ -182,7 +198,7 @@
         <!-- DATA FINAL -->
         <div class="flex flex-col gap-1">
             <label class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">
-                Emissão Final
+                Adesão Final
             </label>
             <input
                 id="filtro-data-final"
@@ -229,46 +245,41 @@
 </header>
 
 <!-- KPIs -->
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-8">
 
-    <div class="kpi-card p-4 shadow-xl border-2 border-blue-500/50">
-        <div class="flex justify-between items-start mb-4">
-            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Total Vendas</span>
-            <div class="bg-slate-800 p-2 rounded-lg text-xl">📊</div>
-        </div>
-        <h2 id="kpi-vendas" class="text-1xl font-extrabold text-blue-400 tracking-tight">0</h2>
+    <div class="kpi-card p-4">
+        <p class="text-[10px] uppercase tracking-widest text-blue-400 font-bold">Total Vendas</p>
+        <h2 id="kpi-vendas" class="kpi-value mt-2 text-blue-400">0</h2>
     </div>
 
-    <div class="kpi-card p-4 shadow-xl border-2 border-emerald-500/50">
-        <div class="flex justify-between items-start mb-4">
-            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Valor Liquidado</span>
-            <div class="bg-slate-800 p-2 rounded-lg text-xl">💰</div>
-        </div>
-        <h2 id="kpi-liquidado" class="text-1xl font-extrabold text-emerald-400 tracking-tight">R$ 0,00</h2>
+    <div class="kpi-card p-4">
+        <p class="text-[10px] uppercase tracking-widest text-emerald-400 font-bold">Mensalidades</p>
+        <h2 id="kpi-liquidado" class="kpi-value mt-2 text-emerald-400">R$ 0,00</h2>
     </div>
 
-    <div class="kpi-card p-4 shadow-xl border-2 border-orange-500/50">
-        <div class="flex justify-between items-start mb-4">
-            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Carteira Total</span>
-            <div class="bg-slate-800 p-2 rounded-lg text-xl">📁</div>
-        </div>
-        <h2 id="kpi-carteira" class="text-1xl font-extrabold text-white tracking-tight">R$ 0,00</h2>
+    <div class="kpi-card p-4">
+        <p class="text-[10px] uppercase tracking-widest text-orange-400 font-bold">Valor Segurado</p>
+        <h2 id="kpi-carteira" class="kpi-value mt-2 text-white">R$ 0,00</h2>
     </div>
 
-    <div class="kpi-card p-4 shadow-xl border-2 border-purple-500/50">
-        <div class="flex justify-between items-start mb-4">
-            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Ticket Médio</span>
-            <div class="bg-slate-800 p-2 rounded-lg text-xl">💎</div>
-        </div>
-        <h2 id="kpi-ticket" class="text-1xl font-extrabold text-white tracking-tight">R$ 0,00</h2>
+    <div class="kpi-card p-4">
+        <p class="text-[10px] uppercase tracking-widest text-purple-400 font-bold">Ticket Médio</p>
+        <h2 id="kpi-ticket" class="kpi-value mt-2 text-purple-400">R$ 0,00</h2>
     </div>
 
-    <div class="kpi-card p-4 shadow-xl border-2 border-yellow-500/50">
-        <div class="flex justify-between items-start mb-4">
-            <span class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">Regionais</span>
-            <div class="bg-slate-800 p-2 rounded-lg text-xl">🏢</div>
-        </div>
-        <h2 id="kpi-base" class="text-1xl font-extrabold text-white tracking-tight">0</h2>
+    <div class="kpi-card p-4">
+        <p class="text-[10px] uppercase tracking-widest text-yellow-400 font-bold">Regionais</p>
+        <h2 id="kpi-base" class="kpi-value mt-2 text-yellow-400">0</h2>
+    </div>
+
+    <div class="kpi-card p-4">
+        <p class="text-[10px] uppercase tracking-widest text-cyan-400 font-bold">Adicionais</p>
+        <h2 id="kpi-adicionais" class="kpi-value mt-2 text-cyan-400">R$ 0,00</h2>
+    </div>
+
+    <div class="kpi-card p-4">
+        <p class="text-[10px] uppercase tracking-widest text-red-400 font-bold">Cancelamento</p>
+        <h2 id="kpi-cancelamento" class="kpi-value mt-2 text-red-400">0%</h2>
     </div>
 
 </div>
@@ -278,14 +289,14 @@
 
     <div class="card lg:col-span-2">
         <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
-            Evolução Mensal de Vendas
+            Adesões por Mês
         </h2>
         <canvas id="chart-evolucao"></canvas>
     </div>
 
     <div class="card">
         <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
-            Situação da Carteira
+            Situação das Adesões
         </h2>
         <canvas id="chart-situacao"></canvas>
     </div>
@@ -321,6 +332,65 @@
             Categorias de Veículos
         </h2>
         <canvas id="chart-categorias"></canvas>
+    </div>
+
+</div>
+
+<!-- GRÁFICOS — LINHA 3 -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Adesões por UF
+        </h2>
+        <canvas id="chart-uf"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Top 10 Cidades
+        </h2>
+        <canvas id="chart-cidade"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Top 10 Marcas de Veículo
+        </h2>
+        <canvas id="chart-marca"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Carro × Moto
+        </h2>
+        <canvas id="chart-tipo"></canvas>
+    </div>
+
+</div>
+
+<!-- GRÁFICOS — LINHA 4 (Perfil do Cliente) -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Perfil — Faixa Etária
+        </h2>
+        <canvas id="chart-idade"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Perfil — Sexo
+        </h2>
+        <canvas id="chart-sexo"></canvas>
+    </div>
+
+    <div class="card">
+        <h2 class="text-sm font-bold text-gray-200 uppercase tracking-wide mb-4">
+            Perfil — Faixa de Mensalidade
+        </h2>
+        <canvas id="chart-mensalidade"></canvas>
     </div>
 
 </div>
@@ -373,13 +443,13 @@
         <table class="w-full text-sm text-left text-gray-300">
             <thead class="text-xs text-gray-400 uppercase bg-slate-800 border-b border-gray-700">
                 <tr>
-                    <th class="px-4 py-3">Data Emissão</th>
+                    <th class="px-4 py-3">Data Adesão</th>
                     <th class="px-4 py-3">Cliente</th>
                     <th class="px-4 py-3">Consultor</th>
                     <th class="px-4 py-3">Placa</th>
                     <th class="px-4 py-3">Regional</th>
                     <th class="px-4 py-3">Situação</th>
-                    <th class="px-4 py-3 text-right">Valor</th>
+                    <th class="px-4 py-3 text-right">Mensalidade</th>
                 </tr>
             </thead>
             <tbody id="table-body"></tbody>
@@ -446,6 +516,8 @@ function renderKPIs(cards) {
     document.getElementById('kpi-carteira').textContent  = fmtBRL(cards.carteira_total);
     document.getElementById('kpi-ticket').textContent    = fmtBRL(cards.ticket_medio);
     document.getElementById('kpi-base').textContent      = fmtNum(cards.regionais);
+    document.getElementById('kpi-adicionais').textContent   = fmtBRL(cards.adicionais);
+    document.getElementById('kpi-cancelamento').textContent = (cards.taxa_cancelamento ?? 0).toLocaleString('pt-BR') + '%';
 }
 
 // =========================================================
@@ -542,6 +614,13 @@ function renderGraficos(g) {
     renderBarChart( 'chart-representantes', g.representantes.labels, g.representantes.valores, '#22C55E');
     renderBarChart( 'chart-lojas',          g.por_regional.labels,   g.por_regional.valores,   '#8B5CF6');
     renderDonut(    'chart-categorias',     g.categorias.labels,     g.categorias.valores);
+    renderBarChart( 'chart-uf',             g.por_uf.labels,         g.por_uf.valores,         '#06B6D4');
+    renderBarChart( 'chart-cidade',         g.por_cidade.labels,     g.por_cidade.valores,     '#14B8A6');
+    renderBarChart( 'chart-marca',          g.por_marca.labels,      g.por_marca.valores,      '#F59E0B');
+    renderDonut(    'chart-tipo',           g.por_tipo.labels,       g.por_tipo.valores);
+    renderBarChart( 'chart-idade',          g.perfil_idade.labels,   g.perfil_idade.valores,   '#3B82F6');
+    renderDonut(    'chart-sexo',           g.perfil_sexo.labels,    g.perfil_sexo.valores);
+    renderBarChart( 'chart-mensalidade',    g.perfil_mensalidade.labels, g.perfil_mensalidade.valores, '#22C55E');
 }
 
 // =========================================================
@@ -574,9 +653,11 @@ function renderTabela(dados) {
             <td class="px-4 py-3 text-xs">${item.unidade || 'N/A'}</td>
             <td class="px-4 py-3">
                 <span class="px-2 py-1 rounded text-[10px] font-bold ${
-                    (item.situacao || '').includes('LIQUID')
+                    /ativ/i.test(item.situacao || '')
                         ? 'bg-green-900 text-green-200'
-                        : 'bg-yellow-900 text-yellow-200'
+                        : /cancel/i.test(item.situacao || '')
+                            ? 'bg-red-900 text-red-200'
+                            : 'bg-yellow-900 text-yellow-200'
                 }">
                     ${item.situacao || 'N/A'}
                 </span>

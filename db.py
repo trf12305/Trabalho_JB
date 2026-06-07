@@ -329,6 +329,38 @@ def congelar_ano(ano):
     return n
 
 
+def congelar_mes(ano, mes):
+    """Marca todos os títulos de um (ano, mes) como congelados (imutáveis).
+    Usado no fechamento mensal: ao virar o mês, o mês que fechou vira um
+    retrato fixo e nunca mais é apagado/sobrescrito pelo replace-por-mês."""
+    with _write_lock:
+        conn = _conn()
+        try:
+            cur = _cursor(conn)
+            cur.execute(_q('UPDATE titulos SET congelado=1 WHERE ano=? AND mes=?'), (ano, mes))
+            n = cur.rowcount
+            conn.commit()
+        finally:
+            conn.close()
+    log.info(f'[DB] {mes:02d}/{ano} CONGELADO — {n} títulos protegidos')
+    return n
+
+
+def descongelar_mes(ano, mes):
+    """Reverte o congelamento de um (ano, mes) específico (uso administrativo)."""
+    with _write_lock:
+        conn = _conn()
+        try:
+            cur = _cursor(conn)
+            cur.execute(_q('UPDATE titulos SET congelado=0 WHERE ano=? AND mes=?'), (ano, mes))
+            n = cur.rowcount
+            conn.commit()
+        finally:
+            conn.close()
+    log.info(f'[DB] {mes:02d}/{ano} DESCONGELADO — {n} títulos liberados')
+    return n
+
+
 def descongelar_ano(ano):
     """Reverte o congelamento de um ano (uso administrativo)."""
     with _write_lock:
@@ -385,6 +417,21 @@ def estatisticas():
             for r in periodos
         ],
     }
+
+
+def is_congelado(ano, mes):
+    """True se o (ano, mes) tem títulos CONGELADOS (mês fechado/imutável).
+    Usado pelo coletor para PULAR meses fechados (não re-baixar do Siprov)."""
+    conn = _conn()
+    try:
+        cur = _cursor(conn)
+        cur.execute(_q(
+            'SELECT COUNT(*) AS n FROM titulos WHERE ano=? AND mes=? AND congelado=1'
+        ), (ano, mes))
+        row = cur.fetchone()
+        return bool(row['n']) if row else False
+    finally:
+        conn.close()
 
 
 def contar():

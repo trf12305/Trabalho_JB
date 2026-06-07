@@ -11,7 +11,6 @@ from functools import wraps
 
 from dotenv import load_dotenv
 load_dotenv()
-
 from flask import (
     Flask, render_template, request, redirect,
     session, jsonify, make_response, url_for,
@@ -19,8 +18,8 @@ from flask import (
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-
 import db as bancodados
+import db_adesoes  # fonte ISOLADA do dashboard de Vendas (relatório de adesão)
 
 # =========================================================
 # LOGGING
@@ -259,17 +258,30 @@ def _carregar_do_json_legado():
         return json.load(f)
 
 
-def carregar_dados_json():
+def carregar_dados_json(anos=None):
     """
     Fonte de dados do dashboard: banco SQLite (db.py).
-    Invalida o cache pela chave 'ultima_sync' do banco.
+
+    Por padrão (anos=None) carrega APENAS o ANO CORRENTE — assim o histórico
+    congelado de anos anteriores (ex.: 2025) permanece no banco para o YoY e
+    para o filtro explícito 'Ano Passado', mas NÃO infla a visão padrão.
+    Passe anos=[2025] (ou múltiplos) para carregar anos específicos.
+
+    O cache é invalidado pela chave 'ultima_sync' + conjunto de anos.
     Se o banco estiver vazio, cai para o JSON legado e o importa.
     """
+    if anos is None:
+        anos = [datetime.now().year]
+    anos = sorted({int(a) for a in anos})
+
     chave_sync = bancodados.meta_get('ultima_sync') or 'vazio'
-    if _cache['arquivo'] != chave_sync:
-        _cache['arquivo']           = chave_sync
+    chave = f"{chave_sync}|anos={','.join(map(str, anos))}"
+    if _cache['arquivo'] != chave:
+        _cache['arquivo']           = chave
         _cache['dados_brutos']      = None
         _cache['dados_processados'] = None
+        _cache['dados_eventos']     = None
+        _cache['dados_vendas']      = None
 
     if _cache['dados_brutos'] is None:
         total = bancodados.contar()
@@ -279,11 +291,13 @@ def carregar_dados_json():
             if legado:
                 logger.info(f'[DADOS] Banco vazio — importando {len(legado)} registros do JSON legado.')
                 bancodados.substituir_periodo(legado)
-                _cache['arquivo'] = bancodados.meta_get('ultima_sync') or 'vazio'
             _cache['dados_brutos'] = legado
         else:
-            _cache['dados_brutos'] = bancodados.ler_titulos()
-            logger.info(f'[DADOS] Carregados {len(_cache["dados_brutos"])} registros do banco SQLite.')
+            registros = []
+            for a in anos:
+                registros.extend(bancodados.ler_titulos(ano=a))
+            _cache['dados_brutos'] = registros
+            logger.info(f'[DADOS] Carregados {len(registros)} registros (anos={anos}) do banco SQLite.')
     return _cache['dados_brutos']
 
 
@@ -402,6 +416,30 @@ def filtrar_dados(dados, tipo='vencimento', data_inicial=None,data_final=None, b
         filtrado.append(novo)
 
     return filtrado
+
+
+def _anos_do_filtro(data_inicial, data_final):
+    """Decide QUAIS anos (de vencimento) carregar do banco a partir do filtro.
+
+    - Sem filtro de data  -> apenas o ANO CORRENTE (visão padrão limpa; o
+      histórico congelado de 2025 fica no banco só para o YoY e para quando
+      o usuário pedir 'Ano Passado').
+    - Com filtro          -> todos os anos abrangidos pelo intervalo pedido.
+
+    Mantém os dados históricos disponíveis sob demanda sem inflar a visão
+    padrão dos dashboards."""
+    di = parse_date(data_inicial)
+    df = parse_date(data_final)
+    if not di and not df:
+        return [datetime.now().year]
+    anos = set()
+    if di:
+        anos.add(di.year)
+    if df:
+        anos.add(df.year)
+    if di and df and df.year >= di.year:
+        anos = set(range(di.year, df.year + 1))
+    return sorted(anos) if anos else [datetime.now().year]
 
 
 # =========================================================
@@ -778,9 +816,11 @@ def api_financeiro():
         if data_final and not parse_date(data_final):
             data_final = None
 
-        logger.info(f'[API/FIN] tipo={tipo} | {data_inicial} -> {data_final} | bases={bases}')
+        anos = _anos_do_filtro(data_inicial, data_final)
 
-        dados_brutos = carregar_dados_json()
+        logger.info(f'[API/FIN] tipo={tipo} | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
+
+        dados_brutos = carregar_dados_json(anos)
 
         if _cache['dados_processados'] is None:
             _cache['dados_processados'] = processar_dados_para_dash(dados_brutos)
@@ -912,7 +952,8 @@ def api_financeiro_export():
         if tipo not in ('vencimento', 'liquidacao'):
             tipo = 'vencimento'
 
-        dados_brutos = carregar_dados_json()
+        anos = _anos_do_filtro(data_inicial, data_final)
+        dados_brutos = carregar_dados_json(anos)
         if _cache['dados_processados'] is None:
             _cache['dados_processados'] = processar_dados_para_dash(dados_brutos)
 
@@ -946,42 +987,69 @@ def api_financeiro_export():
 
 
 # =========================================================
-# PROCESSAMENTO — VENDAS
+# PROCESSAMENTO — VENDAS  (fonte: tabela `adesoes`, isolada do financeiro)
 # =========================================================
 
-def processar_dados_vendas(dados_originais):
-    dados_sem_dup = _dedup_raw(dados_originais)
+# Cache próprio do Vendas — separado do _cache do financeiro.
+_cache_adesoes = {'chave': None, 'brutos': None, 'processados': None}
+
+
+def carregar_adesoes(anos=None):
+    """Carrega adesões da tabela própria `adesoes` (db_adesoes). Fonte do
+    dashboard de Vendas, TOTALMENTE separada do financeiro. Por padrão carrega
+    o ano corrente; o cache é invalidado pela última sync de adesões + anos."""
+    if anos is None:
+        anos = [datetime.now().year]
+    anos = sorted({int(a) for a in anos})
+    chave = f"{db_adesoes.ultima_sync() or 'vazio'}|anos={','.join(map(str, anos))}"
+    if _cache_adesoes['chave'] != chave:
+        _cache_adesoes['chave'] = chave
+        registros = []
+        for a in anos:
+            registros.extend(db_adesoes.ler(ano=a))
+        _cache_adesoes['brutos'] = registros
+        _cache_adesoes['processados'] = None
+        logger.info(f'[ADESOES] Carregadas {len(registros)} adesões (anos={anos}).')
+    return _cache_adesoes['brutos']
+
+
+def processar_dados_vendas(adesoes_brutas):
+    """Normaliza registros de ADESÃO (relatório Siprov 1393 'dashboard de venda')
+    para o dashboard de Vendas. Cada registro = uma adesão (uma venda).
+    Fonte ISOLADA do financeiro — vem da tabela `adesoes`."""
     registros = []
-
-    for item in dados_sem_dup:
-        registro = {
+    for item in adesoes_brutas:
+        registros.append({
             'beneficio_sequencial': str(item.get('beneficio_sequencial') or '').strip(),
-            'titulo_parcela':       str(item.get('titulo_parcela')        or '').strip(),
-            'cliente':     (item.get('pessoa_nome_razao_social') or 'N/A').strip(),
-            'unidade':     (item.get('unidade_nome_fantasia') or item.get('unidade_razao_social') or 'SEM UNIDADE').strip(),
-            'consultor':   extrair_nome(item.get('beneficio_consultor')    or '') or 'SEM CONSULTOR',
-            'representante': extrair_nome(item.get('beneficio_representante') or '') or 'SEM REPRESENTANTE',
-            'situacao':    (item.get('titulo_situacao_titulo') or '').strip().upper(),
-            'data_emissao':    str(item.get('titulo_data_emissao')    or ''),
-            'data_vencimento': str(item.get('titulo_data_vencimento') or ''),
-            'valor_titulo':    to_float(item.get('titulo_valor')),
-            'valor_liquidado': to_float(item.get('liquidacao_valor_liquidado')),
+            'cliente':       (item.get('associado_nome_razao_social') or 'N/A').strip(),
+            'unidade':       (item.get('unidade_nome_fantasia') or item.get('unidade_razao_social') or 'SEM UNIDADE').strip(),
+            'consultor':     (item.get('beneficio_nome_consultor') or '').strip() or 'SEM CONSULTOR',
+            'representante': (item.get('beneficio_representante') or '').strip() or 'SEM REPRESENTANTE',
+            'situacao':      (item.get('beneficio_situacao_atual') or 'N/A').strip() or 'N/A',
+            'data_adesao':   str(item.get('beneficio_data_adesao') or ''),
+            'mensalidade':   to_float(item.get('beneficio_valor_mensalidade')),
+            'valor_veiculo': to_float(item.get('veiculo_valor_veiculo')),
+            'adicionais':    to_float(item.get('beneficio_planos_adicionais_valor')),
             'placa':             (item.get('veiculo_placa_veiculo') or '').strip(),
-            'veiculo_categoria': (item.get('veiculo_categoria')     or 'Outros').strip() or 'Outros',
+            'veiculo_categoria': (item.get('veiculo_categoria_veiculo') or 'Outros').strip() or 'Outros',
             'veiculo_marca':     (item.get('veiculo_marca_veiculo') or '').strip(),
-        }
-        registros.append(registro)
-
+            'veiculo_tipo':      (item.get('veiculo_tipo_veiculo') or '').strip(),
+            'uf':                (item.get('endereco_uf_padrao') or '').strip(),
+            'cidade':            (item.get('endereco_cidade_padrao') or '').strip().title(),
+            'idade':             item.get('associado_idade'),
+            'sexo':              (item.get('associado_sexo') or '').strip().upper(),
+        })
     return registros
 
 
 def filtrar_dados_vendas(dados, data_inicial=None, data_final=None, bases=None):
+    """Filtra adesões por DATA DE ADESÃO (data da venda) e por unidade/base."""
     di = parse_date(data_inicial)
     df = parse_date(data_final)
     filtrado = []
 
     for item in dados:
-        data_ref = parse_date(item.get('data_emissao'))
+        data_ref = parse_date(item.get('data_adesao'))
         if data_ref is None:
             continue
         if di and data_ref < di:
@@ -1001,52 +1069,44 @@ def filtrar_dados_vendas(dados, data_inicial=None, data_final=None, bases=None):
 # =========================================================
 
 def gerar_dashboard_vendas(dados, dados_completos):
-    ids_unicos = {d['beneficio_sequencial'] for d in dados if d.get('beneficio_sequencial')}
-    sem_id     = sum(1 for d in dados if not d.get('beneficio_sequencial'))
-    total_vendas = len(ids_unicos) + sem_id
+    # Cada adesão = uma venda. Conta TODAS as adesões do período.
+    total_vendas = len(dados)
 
-    valor_liquidado = round(
-        sum(
-            to_float(d.get('valor_liquidado', 0))
-            for d in dados
-            if d.get('situacao', '') in SITUACOES_LIQUIDACAO
-            and to_float(d.get('valor_liquidado', 0)) > 0
-        ), 2,
-    )
-
-    carteira_total = round(
-        sum(
-            to_float(d.get('valor_titulo', 0))
-            for d in dados
-            if to_float(d.get('valor_titulo', 0)) > 0
-        ), 2,
-    )
+    total_mensalidade = round(sum(to_float(d.get('mensalidade', 0)) for d in dados), 2)
+    total_veiculos    = round(sum(to_float(d.get('valor_veiculo', 0)) for d in dados), 2)
 
     ticket_medio = round(
-        (carteira_total / total_vendas) if total_vendas > 0 else 0.0, 2
+        (total_mensalidade / total_vendas) if total_vendas > 0 else 0.0, 2
     )
 
     regionais = len({d.get('unidade', '').strip() for d in dados if d.get('unidade')})
 
+    total_adicionais = round(sum(to_float(d.get('adicionais', 0)) for d in dados), 2)
+
+    n_cancelados = sum(1 for d in dados if 'CANCEL' in (d.get('situacao') or '').upper())
+    taxa_cancelamento = round((n_cancelados / total_vendas * 100) if total_vendas > 0 else 0.0, 1)
+
     def _top_count(registros, campo, top=10):
         cnt = {}
         for d in registros:
-            k = (d.get(campo) or 'N/A').strip()
+            k = (d.get(campo) or 'N/A').strip() or 'N/A'
             cnt[k] = cnt.get(k, 0) + 1
         items = sorted(cnt.items(), key=lambda x: x[1], reverse=True)[:top]
         return [x[0] for x in items], [x[1] for x in items]
 
+    # Evolução: nº de adesões por mês (data de adesão)
     evolucao = {}
     for d in dados:
-        mes = d.get('data_emissao', '')[:7]
+        mes = (d.get('data_adesao') or '')[:7]
         if len(mes) == 7:
             evolucao[mes] = evolucao.get(mes, 0) + 1
     lbl_evol = sorted(evolucao)
     val_evol = [evolucao[m] for m in lbl_evol]
 
+    # Situação atual da adesão (Ativo / Cancelado / ...)
     sit_cnt = {}
     for d in dados:
-        s = d.get('situacao', '') or 'OUTROS'
+        s = (d.get('situacao') or 'OUTROS').strip().upper() or 'OUTROS'
         sit_cnt[s] = sit_cnt.get(s, 0) + 1
     lbl_sit = list(sit_cnt.keys())
     val_sit = list(sit_cnt.values())
@@ -1055,6 +1115,62 @@ def gerar_dashboard_vendas(dados, dados_completos):
     lbl_rep,  val_rep  = _top_count(dados, 'representante',     top=10)
     lbl_reg,  val_reg  = _top_count(dados, 'unidade',           top=10)
     lbl_cat,  val_cat  = _top_count(dados, 'veiculo_categoria', top=8)
+    lbl_uf,   val_uf   = _top_count(dados, 'uf',                top=12)
+    lbl_cidade, val_cidade = _top_count(dados, 'cidade',        top=10)
+    lbl_marca, val_marca = _top_count(dados, 'veiculo_marca',   top=10)
+
+    # Carro × Moto — derivado de veiculo_categoria (campo limpo):
+    # MOTOCICLETA -> Moto; LEVE/UTILITARIO/PESADO -> Carro.
+    tipo_cnt = {'Carro': 0, 'Moto': 0, 'Outros': 0}
+    for d in dados:
+        cat = (d.get('veiculo_categoria') or '').upper()
+        if 'MOTO' in cat:
+            tipo_cnt['Moto'] += 1
+        elif any(k in cat for k in ('LEVE', 'UTIL', 'PESAD', 'CARRO', 'CAMINH')):
+            tipo_cnt['Carro'] += 1
+        else:
+            tipo_cnt['Outros'] += 1
+    lbl_tipo = [k for k in ('Carro', 'Moto', 'Outros') if tipo_cnt[k] > 0]
+    val_tipo = [tipo_cnt[k] for k in lbl_tipo]
+
+    # Perfil — faixa etária
+    faixas_idade = ['18-24', '25-34', '35-44', '45-54', '55+', 'N/A']
+    idade_cnt = {f: 0 for f in faixas_idade}
+    for d in dados:
+        try:
+            i = int(d.get('idade'))
+        except (TypeError, ValueError):
+            idade_cnt['N/A'] += 1
+            continue
+        if   i < 25: idade_cnt['18-24'] += 1
+        elif i < 35: idade_cnt['25-34'] += 1
+        elif i < 45: idade_cnt['35-44'] += 1
+        elif i < 55: idade_cnt['45-54'] += 1
+        else:        idade_cnt['55+']   += 1
+    lbl_idade = [f for f in faixas_idade if idade_cnt[f] > 0]
+    val_idade = [idade_cnt[f] for f in lbl_idade]
+
+    # Perfil — sexo
+    sexo_map = {'M': 'Masculino', 'F': 'Feminino'}
+    sexo_cnt = {}
+    for d in dados:
+        s = sexo_map.get((d.get('sexo') or '').upper(), 'Outros')
+        sexo_cnt[s] = sexo_cnt.get(s, 0) + 1
+    lbl_sexo = list(sexo_cnt.keys())
+    val_sexo = list(sexo_cnt.values())
+
+    # Perfil — faixa de mensalidade
+    faixas_mens = ['< 80', '80–100', '100–150', '150–200', '200+']
+    mens_cnt = {f: 0 for f in faixas_mens}
+    for d in dados:
+        v = to_float(d.get('mensalidade', 0))
+        if   v < 80:  mens_cnt['< 80']    += 1
+        elif v < 100: mens_cnt['80–100']  += 1
+        elif v < 150: mens_cnt['100–150'] += 1
+        elif v < 200: mens_cnt['150–200'] += 1
+        else:         mens_cnt['200+']    += 1
+    lbl_mens = [f for f in faixas_mens if mens_cnt[f] > 0]
+    val_mens = [mens_cnt[f] for f in lbl_mens]
 
     bases_lista = sorted({
         d.get('unidade', '').strip()
@@ -1062,16 +1178,18 @@ def gerar_dashboard_vendas(dados, dados_completos):
         if d.get('unidade')
     })
 
-    dados_ord = sorted(dados, key=lambda x: x.get('data_emissao') or '', reverse=True)
+    dados_ord = sorted(dados, key=lambda x: x.get('data_adesao') or '', reverse=True)
     tabela = [
         {
-            'data_emissao': d.get('data_emissao'),
+            # Mantém as chaves 'data_emissao' e 'valor_titulo' que o JS já lê,
+            # preenchidas com a semântica de adesão (data da venda / mensalidade).
+            'data_emissao': d.get('data_adesao'),
             'cliente':      d.get('cliente'),
             'consultor':    d.get('consultor'),
             'placa':        d.get('placa'),
             'unidade':      d.get('unidade'),
             'situacao':     d.get('situacao'),
-            'valor_titulo': to_float(d.get('valor_titulo', 0)),
+            'valor_titulo': to_float(d.get('mensalidade', 0)),
         }
         for d in dados_ord[:500]
     ]
@@ -1079,18 +1197,27 @@ def gerar_dashboard_vendas(dados, dados_completos):
     return {
         'cards': {
             'total_vendas':    total_vendas,
-            'valor_liquidado': valor_liquidado,
-            'carteira_total':  carteira_total,
-            'ticket_medio':    ticket_medio,
+            'valor_liquidado': total_mensalidade,   # rótulo: Mensalidades (R$)
+            'carteira_total':  total_veiculos,       # rótulo: Valor Segurado (Veículos)
+            'ticket_medio':    ticket_medio,         # rótulo: Ticket Médio (Mensalidade)
             'regionais':       regionais,
+            'adicionais':      total_adicionais,     # rótulo: Adicionais (R$)
+            'taxa_cancelamento': taxa_cancelamento,  # rótulo: Cancelamento (%)
         },
         'graficos': {
-            'evolucao':       {'labels': lbl_evol, 'valores': val_evol},
-            'situacao':       {'labels': lbl_sit,  'valores': val_sit},
-            'consultores':    {'labels': lbl_cons, 'valores': val_cons},
-            'representantes': {'labels': lbl_rep,  'valores': val_rep},
-            'por_regional':   {'labels': lbl_reg,  'valores': val_reg},
-            'categorias':     {'labels': lbl_cat,  'valores': val_cat},
+            'evolucao':       {'labels': lbl_evol,  'valores': val_evol},
+            'situacao':       {'labels': lbl_sit,   'valores': val_sit},
+            'consultores':    {'labels': lbl_cons,  'valores': val_cons},
+            'representantes': {'labels': lbl_rep,   'valores': val_rep},
+            'por_regional':   {'labels': lbl_reg,   'valores': val_reg},
+            'categorias':     {'labels': lbl_cat,   'valores': val_cat},
+            'por_uf':         {'labels': lbl_uf,     'valores': val_uf},
+            'por_cidade':     {'labels': lbl_cidade, 'valores': val_cidade},
+            'por_marca':      {'labels': lbl_marca,  'valores': val_marca},
+            'por_tipo':       {'labels': lbl_tipo,  'valores': val_tipo},
+            'perfil_idade':   {'labels': lbl_idade, 'valores': val_idade},
+            'perfil_sexo':    {'labels': lbl_sexo,  'valores': val_sexo},
+            'perfil_mensalidade': {'labels': lbl_mens, 'valores': val_mens},
         },
         'tabela':      tabela,
         'bases_lista': bases_lista,
@@ -1114,14 +1241,16 @@ def api_vendas():
         if data_final and not parse_date(data_final):
             data_final = None
 
-        logger.info(f'[API/VENDAS] {data_inicial} -> {data_final} | bases={bases}')
+        anos = _anos_do_filtro(data_inicial, data_final)
 
-        dados_brutos = carregar_dados_json()
+        logger.info(f'[API/VENDAS] {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
 
-        if _cache['dados_vendas'] is None:
-            _cache['dados_vendas'] = processar_dados_vendas(dados_brutos)
+        adesoes_brutas = carregar_adesoes(anos)
 
-        dados_vendas    = _cache['dados_vendas']
+        if _cache_adesoes['processados'] is None:
+            _cache_adesoes['processados'] = processar_dados_vendas(adesoes_brutas)
+
+        dados_vendas    = _cache_adesoes['processados']
         dados_filtrados = filtrar_dados_vendas(dados_vendas, data_inicial, data_final, bases)
 
         logger.info(f'[API/VENDAS] total={len(dados_vendas)} filtrados={len(dados_filtrados)}')
@@ -1142,12 +1271,13 @@ def api_vendas_export():
         data_final   = request.args.get('data_final')   or None
         bases        = request.args.getlist('bases')
 
-        dados_brutos = carregar_dados_json()
-        if _cache['dados_vendas'] is None:
-            _cache['dados_vendas'] = processar_dados_vendas(dados_brutos)
+        anos = _anos_do_filtro(data_inicial, data_final)
+        adesoes_brutas = carregar_adesoes(anos)
+        if _cache_adesoes['processados'] is None:
+            _cache_adesoes['processados'] = processar_dados_vendas(adesoes_brutas)
 
         dados_filtrados = filtrar_dados_vendas(
-            _cache['dados_vendas'], data_inicial, data_final, bases
+            _cache_adesoes['processados'], data_inicial, data_final, bases
         )
         dados_ord = sorted(dados_filtrados, key=lambda x: x.get('data_emissao') or '', reverse=True)
 
@@ -1393,9 +1523,11 @@ def api_eventos():
         if data_final and not parse_date(data_final):
             data_final = None
 
-        logger.info(f'[API/EVENTOS] {data_inicial} -> {data_final} | bases={bases}')
+        anos = _anos_do_filtro(data_inicial, data_final)
 
-        dados_brutos = carregar_dados_json()
+        logger.info(f'[API/EVENTOS] {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
+
+        dados_brutos = carregar_dados_json(anos)
 
         if _cache['dados_eventos'] is None:
             _cache['dados_eventos'] = processar_dados_eventos(dados_brutos)
@@ -1422,7 +1554,8 @@ def api_eventos_export():
         data_final   = request.args.get('data_final')   or None
         bases        = request.args.getlist('bases')
 
-        dados_brutos = carregar_dados_json()
+        anos = _anos_do_filtro(data_inicial, data_final)
+        dados_brutos = carregar_dados_json(anos)
         if _cache['dados_eventos'] is None:
             _cache['dados_eventos'] = processar_dados_eventos(dados_brutos)
 
@@ -1602,12 +1735,93 @@ def _congelar_ano_anterior():
         logger.exception('[DB] Falha ao congelar ano anterior')
 
 
+def _sync_adesoes():
+    """Sync da fonte de Vendas (adesões). Separada do financeiro."""
+    try:
+        import siprov_adesao
+        siprov_adesao.sincronizar()
+        _cache_adesoes['chave'] = None  # invalida cache do Vendas
+        logger.info('[ADESOES] Cache invalidado apos sync.')
+    except Exception:
+        logger.exception('[ADESOES] Falha na sync de adesoes')
+
+
+# =========================================================
+# FECHAMENTO MENSAL — geral, para TODOS os dashboards (atuais e futuros)
+# =========================================================
+# Cada fonte de dados registra aqui COMO buscar o mês final e COMO congelá-lo.
+# Para cobrir um dashboard novo no futuro, basta adicionar uma entrada nesta
+# lista — o fechamento mensal passa a arquivá-lo automaticamente.
+def _fontes_arquivaveis():
+    import siprov_adesao
+    return [
+        {
+            'nome': 'financeiro/titulos',
+            'sync_mes': lambda ano, mes: _executar_sync(),  # janela cobre o mês que fechou
+            'congelar_mes': lambda ano, mes: bancodados.congelar_mes(ano, mes),
+        },
+        {
+            'nome': 'vendas/adesoes',
+            'sync_mes': lambda ano, mes: siprov_adesao.coletar_mes(ano, mes),
+            'congelar_mes': lambda ano, mes: db_adesoes.congelar_mes(ano, mes),
+        },
+    ]
+
+
+def _fechamento_mensal(ano=None, mes=None):
+    """Roda no dia 1º de cada mês: para o mês que FECHOU, em TODAS as fontes:
+       (1) busca os dados finais do mês no Siprov,
+       (2) congela o mês (imutável — guardado só para pesquisa/YoY).
+    Mês congelado fica fora da visão padrão (escopo por ano), aparecendo só
+    em consultas históricas / 'Ano Passado'."""
+    if ano is None or mes is None:
+        hoje = datetime.now()
+        if hoje.month == 1:
+            ano, mes = hoje.year - 1, 12
+        else:
+            ano, mes = hoje.year, hoje.month - 1
+
+    logger.info(f'[FECHAMENTO] === Fechando {mes:02d}/{ano} em todas as fontes ===')
+    for fonte in _fontes_arquivaveis():
+        nome = fonte['nome']
+        # 1) Busca final do mês (best-effort — se falhar, ainda congela o que há).
+        #    No modo JB_NO_SYNC só congela (não toca na API).
+        try:
+            if fonte.get('sync_mes') and os.environ.get('JB_NO_SYNC') != '1':
+                logger.info(f'[FECHAMENTO] {nome}: buscando dados finais de {mes:02d}/{ano}…')
+                fonte['sync_mes'](ano, mes)
+        except Exception:
+            logger.exception(f'[FECHAMENTO] {nome}: falha na busca final (vai congelar mesmo assim)')
+        # 2) Congela (ação garantida)
+        try:
+            n = fonte['congelar_mes'](ano, mes)
+            logger.info(f'[FECHAMENTO] {nome}: {mes:02d}/{ano} CONGELADO ({n} registros).')
+        except Exception:
+            logger.exception(f'[FECHAMENTO] {nome}: falha ao congelar')
+
+    # Invalida todos os caches para refletir o congelamento
+    _cache['dados_brutos'] = None
+    _cache['dados_processados'] = None
+    _cache['dados_eventos'] = None
+    _cache['dados_vendas'] = None
+    _cache_adesoes['chave'] = None
+    logger.info(f'[FECHAMENTO] Concluído para {mes:02d}/{ano}.')
+
+
 def _iniciar_scheduler():
     # Garante que o banco existe antes de qualquer operação
     try:
         bancodados.init_db()
+        db_adesoes.init_db()  # tabela isolada do dashboard de Vendas
     except Exception:
         logger.exception('[DB] Falha ao inicializar banco')
+
+    # Interruptor: JB_NO_SYNC=1 roda o app SEM nenhuma sincronização com o
+    # Siprov (sem scheduler 09h/18h e sem sync no startup). Serve só os dados
+    # já existentes no banco. Útil para rodar offline/local sem tocar na API.
+    if os.environ.get('JB_NO_SYNC') == '1':
+        logger.warning('[SIPROV] JB_NO_SYNC=1 — sync DESATIVADO (sem scheduler e sem startup sync).')
+        return
 
     if not os.environ.get('SIPROV_USUARIO') or not os.environ.get('SIPROV_SENHA'):
         logger.warning('[SIPROV] Credenciais nao configuradas — sync automatico desativado.')
@@ -1625,15 +1839,23 @@ def _iniciar_scheduler():
     # ligou 09:58 e perdeu as 09:00), roda o job atrasado assim que voltar,
     # desde que dentro de 1h. coalesce=True: junta execuções perdidas em 1.
     _job_defaults = {'misfire_grace_time': 3600, 'coalesce': True}
-    # Sync às 09:00 e 18:00 (America/Recife) — só o mês corrente é re-puxado
+    # Sync FINANCEIRO às 09:00 e 18:00 (America/Recife) — mês corrente re-puxado
     scheduler.add_job(_executar_sync, 'cron', hour='9,18', minute=0,
                       id='sync_horario', **_job_defaults)
-    # Congelamento anual: 1º de Janeiro às 02:00 — protege o ano fechado
+    # Sync VENDAS/ADESÕES às 09:30 e 18:30 (offset p/ não sobrecarregar a API)
+    scheduler.add_job(_sync_adesoes, 'cron', hour='9,18', minute=30,
+                      id='sync_adesoes', **_job_defaults)
+    # FECHAMENTO MENSAL: 1º de cada mês às 03:00 — busca + congela o mês fechado
+    # em TODAS as fontes (financeiro, vendas e futuras).
+    scheduler.add_job(_fechamento_mensal, 'cron', day=1, hour=3, minute=0,
+                      id='fechamento_mensal', **_job_defaults)
+    # Congelamento anual: 1º de Janeiro às 02:00 — rede de segurança (YoY)
     scheduler.add_job(_congelar_ano_anterior, 'cron', month=1, day=1, hour=2, minute=0,
                       id='congelar_anual', **_job_defaults)
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info('[SIPROV] Scheduler iniciado -- sync 09:00 e 18:00 + congelamento anual 01/Jan')
+    logger.info('[SIPROV] Scheduler: financeiro 09/18h, adesoes 09:30/18:30, '
+                'fechamento mensal dia 1 03h, congelamento anual 01/Jan.')
 
     # Startup sync: dispara em background se a última sync do banco é antiga (> 1h)
     ultima = bancodados.meta_get('ultima_sync')
@@ -1645,10 +1867,21 @@ def _iniciar_scheduler():
                 return
         except ValueError:
             pass
-
     logger.info('[SIPROV] Dados desatualizados — iniciando sync no startup...')
     threading.Thread(target=_executar_sync, daemon=True).start()
 
+    # Startup sync das ADESÕES (Vendas) se estiverem antigas (> 1h) ou vazias
+    ultima_ad = db_adesoes.ultima_sync()
+    precisa_ad = True
+    if ultima_ad:
+        try:
+            idade = (datetime.now() - datetime.fromisoformat(ultima_ad)).total_seconds() / 3600
+            precisa_ad = idade >= 1
+        except ValueError:
+            pass
+    if precisa_ad:
+        logger.info('[ADESOES] Dados desatualizados — iniciando sync no startup...')
+        threading.Thread(target=_sync_adesoes, daemon=True).start()
 
 # =========================================================
 # AUTO-SYNC ATIVADO
@@ -1658,26 +1891,53 @@ def _iniciar_scheduler():
 # Para voltar ao modo JSON-only, comente a linha abaixo.
 _iniciar_scheduler()
 
-
 @app.route('/api/admin/sync', methods=['POST'])
 @login_required
 def api_admin_sync():
+    if os.environ.get('JB_NO_SYNC') == '1':
+        return jsonify({'status': 'sync desativado (JB_NO_SYNC=1)'}), 503
     threading.Thread(target=_executar_sync, daemon=True).start()
     return jsonify({'status': 'sync iniciado em background'})
 
 
+@app.route('/api/admin/sync/adesoes', methods=['POST'])
+@login_required
+def api_admin_sync_adesoes():
+    """Dispara a sincronização de ADESÕES (fonte do Vendas) em background."""
+    if os.environ.get('JB_NO_SYNC') == '1':
+        return jsonify({'status': 'sync desativado (JB_NO_SYNC=1)'}), 503
+    threading.Thread(target=_sync_adesoes, daemon=True).start()
+    return jsonify({'status': 'sync de adesoes iniciado em background'})
+
+
+@app.route('/api/admin/fechamento', methods=['POST'])
+@login_required
+def api_admin_fechamento():
+    """Dispara o FECHAMENTO MENSAL manualmente (busca final + congela o mês
+    em todas as fontes). Body opcional: {"ano": 2026, "mes": 5}. Sem body,
+    fecha o mês ANTERIOR ao corrente."""
+    ano = mes = None
+    if request.is_json:
+        ano = request.json.get('ano')
+        mes = request.json.get('mes')
+    try:
+        ano = int(ano) if ano is not None else None
+        mes = int(mes) if mes is not None else None
+    except (TypeError, ValueError):
+        return jsonify({'erro': 'ano/mes inválidos'}), 400
+    threading.Thread(target=lambda: _fechamento_mensal(ano, mes), daemon=True).start()
+    return jsonify({'status': 'fechamento mensal iniciado em background',
+                    'ano': ano, 'mes': mes})
 # =========================================================
 # UPLOAD DE JSON — modo JSON-only (deploy Railway/produção)
 # =========================================================
 # Permite ao admin substituir o arquivo data/dashboard_financeiro_live.json
 # diretamente via navegador, sem precisar de FTP/SSH/redeploy.
 # Salva no diretório data/ e invalida o cache em memória.
-
 @app.route('/admin/upload', methods=['GET'])
 @login_required
 def admin_upload_page():
     return render_template('admin_upload.html')
-
 
 @app.route('/admin/debug', methods=['GET'])
 @login_required
@@ -1726,7 +1986,6 @@ def admin_debug():
     except Exception as e:
         info['df_error'] = str(e)
     return jsonify(info)
-
 
 @app.route('/api/admin/upload-json', methods=['POST'])
 @login_required
@@ -1787,8 +2046,7 @@ def api_admin_upload_json():
         else:
             os.rename(tmp, destino)
 
-        for k in ('arquivo', 'mtime', 'dados_brutos',
-                  'dados_processados', 'dados_eventos', 'dados_vendas'):
+        for k in ('arquivo', 'mtime', 'dados_brutos','dados_processados', 'dados_eventos', 'dados_vendas'):
             _cache[k] = None
 
         logger.info(
@@ -1804,14 +2062,12 @@ def api_admin_upload_json():
                 'O dashboard já está usando os novos dados.'
             ),
         })
-
     except Exception:
         logger.exception('[UPLOAD] Falha ao processar arquivo')
         return jsonify({
             'status': 'erro',
             'mensagem': 'Erro interno ao processar o arquivo. Veja os logs.',
         }), 500
-
 
 @app.route('/api/admin/sync/status')
 @login_required
@@ -1821,13 +2077,11 @@ def api_admin_sync_status():
     em_andamento = not _sync_lock.acquire(blocking=False)
     if not em_andamento:
         _sync_lock.release()
-
     try:
         from siprov_sync import progresso as siprov_progresso
         prog = dict(siprov_progresso)
     except Exception:
         prog = {}
-
     if not arquivos_sync:
         return jsonify({
             'ultimo_sync': None,
@@ -1844,7 +2098,6 @@ def api_admin_sync_status():
         'progresso': prog,
     })
 
-
 @app.route('/api/admin/db/status')
 @login_required
 def api_admin_db_status():
@@ -1854,7 +2107,6 @@ def api_admin_db_status():
     except Exception:
         logger.exception('[DB] Falha ao ler estatisticas')
         return jsonify({'erro': 'Falha ao ler o banco.'}), 500
-
 
 @app.route('/api/admin/db/congelar', methods=['POST'])
 @login_required
@@ -1869,11 +2121,8 @@ def api_admin_db_congelar():
     # Invalida cache para refletir mudança
     _cache['arquivo'] = None
     return jsonify({'status': 'ok', 'ano': ano, 'titulos_congelados': n})
-
-
 # =========================================================
 # START
 # =========================================================
-
 if __name__ == '__main__':
     app.run(debug=True, use_reloader=False, host='0.0.0.0', port=5000)
