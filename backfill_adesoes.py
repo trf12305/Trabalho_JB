@@ -2,7 +2,6 @@
 """
 backfill_adesoes.py — Busca um intervalo de meses de ADESÃO (layout 1393) no
 Siprov, grava na tabela `adesoes` e CONGELA cada mês do intervalo.
-
 Uso:
     python backfill_adesoes.py ANO MES_INI MES_FIM
     ex.:  python backfill_adesoes.py 2025 1 12
@@ -71,8 +70,6 @@ def coletar(token, meses):
         for (ano, mes), cod in pendentes.items():
             log.error(f"  TIMEOUT {mes:02d}/{ano} cod={cod} nao finalizou")
     return todos
-
-
 def main():
     if len(sys.argv) < 4:
         print("uso: python backfill_adesoes.py ANO MES_INI MES_FIM")
@@ -87,7 +84,6 @@ def main():
     log.info(f"TOTAL coletado: {len(adesoes)} adesoes")
     if adesoes:
         log.info(f"Gravado: {db_adesoes.substituir_periodo(adesoes)}")
-
     # Congela os meses do intervalo que estao presentes no banco
     import db
     e = db.estatisticas  # noqa
@@ -102,7 +98,5 @@ def main():
         else:
             log.warning(f"  {m:02d}/{a} ausente — NAO congelado (reexecute pelo cod).")
     return 0
-
-
 if __name__ == "__main__":
     sys.exit(main())

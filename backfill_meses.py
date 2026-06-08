@@ -14,7 +14,6 @@ NÃO congela o mês corrente — passe apenas meses já FECHADOS.
 import sys
 import time
 import logging
-
 import siprov_sync as ss
 import db as bancodados
 
@@ -27,7 +26,6 @@ TIPO = "CREDITO"
 SITUACOES = ["ABERTO", "PENDENTE", "LIQUIDADO"]
 FILTRO = "vencimento"
 TIMEOUT_GLOBAL = 2400
-
 
 def coletar(token, meses):
     fila = {}
@@ -75,7 +73,6 @@ def coletar(token, meses):
             log.error(f"  TIMEOUT {mes:02d}/{ano} cod={cod} nao finalizou")
     return todos
 
-
 def main():
     if len(sys.argv) < 4:
         print("uso: python backfill_meses.py ANO MES_INI MES_FIM")
@@ -111,7 +108,6 @@ def main():
         flag = "[CONG]" if p['congelado'] else ""
         print(f"  {p['mes']:02d}/{p['ano']}  titulos={p['titulos']:>6} {flag}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

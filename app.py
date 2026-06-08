@@ -1671,10 +1671,48 @@ def _ha_internet(host='acesso.siprov.com.br', porta=443, timeout=5):
         return False
 
 
-def _executar_sync(max_retries=10, retry_delay=120):
+# Horários agendados da sync (America/Recife). Editável aqui.
+# O chefe abre os dashboards às 08h e 18h → puxamos os relatórios 30min antes,
+# para já estar tudo pronto quando ele abrir. Financeiro e adesão no MESMO horário.
+SYNC_SLOTS = ((7, 30), (17, 30))  # 07:30 e 17:30
+
+
+def _slot_ja_coberto(ultima_iso, slots=SYNC_SLOTS):
+    """True se JÁ houve sync desde o último horário agendado (ex.: 07:30/17:30)
+    que já passou hoje. Serve para NÃO re-sincronizar a cada restart/abertura do
+    dashboard — só deixa rodar quando um slot novo chega (ou foi perdido com o
+    note desligado, e aí ele roda assim que liga). Não afeta a sync manual."""
+    if not ultima_iso:
+        return False
+    try:
+        ult = datetime.fromisoformat(ultima_iso)
+    except (ValueError, TypeError):
+        return False
+    agora = datetime.now()
+    slot_dt = None
+    for (h, m) in sorted(slots, reverse=True):
+        cand = agora.replace(hour=h, minute=m, second=0, microsecond=0)
+        if cand <= agora:
+            slot_dt = cand
+            break
+    if slot_dt is None:                       # antes do 1º slot do dia
+        h, m = max(slots)
+        slot_dt = (agora - timedelta(days=1)).replace(
+            hour=h, minute=m, second=0, microsecond=0)
+    return ult >= slot_dt
+
+
+def _executar_sync(max_retries=10, retry_delay=120, forcar=False):
     """Executa a sync. Se falhar por REDE (sem internet, comum logo após o
     boot), aguarda e tenta de novo — até max_retries vezes, com retry_delay
-    segundos entre tentativas. Falhas que não são de rede não fazem retry."""
+    segundos entre tentativas. Falhas que não são de rede não fazem retry.
+
+    forcar=False (agendador/startup): só roda se o slot 09h/17h ainda não foi
+    coberto — evita re-baixar relatório a cada restart/abertura do dashboard.
+    forcar=True (botão manual): roda sempre."""
+    if not forcar and _slot_ja_coberto(bancodados.meta_get('ultima_sync')):
+        logger.info('[SIPROV] Slot 09h/17h já coberto — sem re-sync (restart/abertura).')
+        return
     if not _sync_lock.acquire(blocking=False):
         logger.info('[SIPROV] Sync ja em andamento, ignorando.')
         return
@@ -1735,8 +1773,12 @@ def _congelar_ano_anterior():
         logger.exception('[DB] Falha ao congelar ano anterior')
 
 
-def _sync_adesoes():
-    """Sync da fonte de Vendas (adesões). Separada do financeiro."""
+def _sync_adesoes(forcar=False):
+    """Sync da fonte de Vendas (adesões). Separada do financeiro.
+    Mesma guarda por slot: não re-sincroniza a cada restart/abertura."""
+    if not forcar and _slot_ja_coberto(db_adesoes.ultima_sync()):
+        logger.info('[ADESOES] Slot 09h/17h já coberto — sem re-sync.')
+        return
     try:
         import siprov_adesao
         siprov_adesao.sincronizar()
@@ -1835,15 +1877,16 @@ def _iniciar_scheduler():
         return
 
     scheduler = BackgroundScheduler(daemon=True, timezone='America/Recife')
-    # misfire_grace_time=3600: se o serviço estava down no horário (ex: PC
-    # ligou 09:58 e perdeu as 09:00), roda o job atrasado assim que voltar,
-    # desde que dentro de 1h. coalesce=True: junta execuções perdidas em 1.
-    _job_defaults = {'misfire_grace_time': 3600, 'coalesce': True}
-    # Sync FINANCEIRO às 09:00 e 18:00 (America/Recife) — mês corrente re-puxado
-    scheduler.add_job(_executar_sync, 'cron', hour='9,18', minute=0,
+    # misfire_grace_time=6h + coalesce: se o note estava DESLIGADO no horário
+    # agendado (ex.: perdeu as 09:00), o job roda assim que o serviço subir,
+    # desde que dentro de 6h. coalesce=True junta execuções perdidas em 1.
+    _job_defaults = {'misfire_grace_time': 6 * 3600, 'coalesce': True}
+    # Sync às 07:30 e 17:30 (America/Recife) — 30min antes do chefe abrir (08h/18h).
+    # Financeiro E adesão no MESMO horário (cada um puxa só o mês corrente = 1
+    # relatório, então rodar juntos não sobrecarrega a API).
+    scheduler.add_job(_executar_sync, 'cron', hour='7,17', minute=30,
                       id='sync_horario', **_job_defaults)
-    # Sync VENDAS/ADESÕES às 09:30 e 18:30 (offset p/ não sobrecarregar a API)
-    scheduler.add_job(_sync_adesoes, 'cron', hour='9,18', minute=30,
+    scheduler.add_job(_sync_adesoes, 'cron', hour='7,17', minute=30,
                       id='sync_adesoes', **_job_defaults)
     # FECHAMENTO MENSAL: 1º de cada mês às 03:00 — busca + congela o mês fechado
     # em TODAS as fontes (financeiro, vendas e futuras).
@@ -1854,34 +1897,15 @@ def _iniciar_scheduler():
                       id='congelar_anual', **_job_defaults)
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown(wait=False))
-    logger.info('[SIPROV] Scheduler: financeiro 09/18h, adesoes 09:30/18:30, '
+    logger.info('[SIPROV] Scheduler: financeiro+adesoes 07:30 e 17:30, '
                 'fechamento mensal dia 1 03h, congelamento anual 01/Jan.')
 
-    # Startup sync: dispara em background se a última sync do banco é antiga (> 1h)
-    ultima = bancodados.meta_get('ultima_sync')
-    if ultima:
-        try:
-            idade_horas = (datetime.now() - datetime.fromisoformat(ultima)).total_seconds() / 3600
-            if idade_horas < 1:
-                logger.info(f'[SIPROV] Dados recentes ({idade_horas*60:.0f}min) -- sem sync no startup.')
-                return
-        except ValueError:
-            pass
-    logger.info('[SIPROV] Dados desatualizados — iniciando sync no startup...')
+    # Startup: tenta sincronizar UMA vez ao subir — mas a guarda por slot
+    # interna (_slot_ja_coberto) faz NADA acontecer se o slot 09h/17h já foi
+    # coberto. Assim: NÃO baixa relatório a cada restart/abertura do dashboard;
+    # só roda se um horário foi perdido (note estava desligado).
     threading.Thread(target=_executar_sync, daemon=True).start()
-
-    # Startup sync das ADESÕES (Vendas) se estiverem antigas (> 1h) ou vazias
-    ultima_ad = db_adesoes.ultima_sync()
-    precisa_ad = True
-    if ultima_ad:
-        try:
-            idade = (datetime.now() - datetime.fromisoformat(ultima_ad)).total_seconds() / 3600
-            precisa_ad = idade >= 1
-        except ValueError:
-            pass
-    if precisa_ad:
-        logger.info('[ADESOES] Dados desatualizados — iniciando sync no startup...')
-        threading.Thread(target=_sync_adesoes, daemon=True).start()
+    threading.Thread(target=_sync_adesoes, daemon=True).start()
 
 # =========================================================
 # AUTO-SYNC ATIVADO
@@ -1896,7 +1920,7 @@ _iniciar_scheduler()
 def api_admin_sync():
     if os.environ.get('JB_NO_SYNC') == '1':
         return jsonify({'status': 'sync desativado (JB_NO_SYNC=1)'}), 503
-    threading.Thread(target=_executar_sync, daemon=True).start()
+    threading.Thread(target=lambda: _executar_sync(forcar=True), daemon=True).start()
     return jsonify({'status': 'sync iniciado em background'})
 
 
@@ -1906,7 +1930,7 @@ def api_admin_sync_adesoes():
     """Dispara a sincronização de ADESÕES (fonte do Vendas) em background."""
     if os.environ.get('JB_NO_SYNC') == '1':
         return jsonify({'status': 'sync desativado (JB_NO_SYNC=1)'}), 503
-    threading.Thread(target=_sync_adesoes, daemon=True).start()
+    threading.Thread(target=lambda: _sync_adesoes(forcar=True), daemon=True).start()
     return jsonify({'status': 'sync de adesoes iniciado em background'})
 
 
