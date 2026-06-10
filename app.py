@@ -1962,12 +1962,11 @@ def _iniciar_scheduler():
     logger.info('[SIPROV] Scheduler: financeiro+adesoes 07:30 e 17:30, '
                 'fechamento mensal dia 1 03h, congelamento anual 01/Jan.')
 
-    # Startup: tenta sincronizar UMA vez ao subir — mas a guarda por slot
-    # interna (_slot_ja_coberto) faz NADA acontecer se o slot 09h/17h já foi
-    # coberto. Assim: NÃO baixa relatório a cada restart/abertura do dashboard;
-    # só roda se um horário foi perdido (note estava desligado).
-    threading.Thread(target=_executar_sync, daemon=True).start()
-    threading.Thread(target=_sync_adesoes, daemon=True).start()
+    # NÃO sincronizamos no startup. A sync acontece SOMENTE nos horários
+    # agendados (07:30 e 17:30) ou quando o usuário aperta o botão manual.
+    # (Antes havia um sync de startup — herança de quando rodava no notebook,
+    # que podia estar desligado às 07:30. Na Render ele disparava a cada
+    # abertura/reinício e ficava pedindo relatório ao Siprov sem parar.)
 
 # =========================================================
 # PRÉ-AQUECIMENTO DO CACHE DE RESULTADO
