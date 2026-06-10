@@ -226,6 +226,30 @@ _cache = {
     'dados_vendas':      None,
 }
 
+# Cache do RESULTADO já calculado (dashboard pronto), por assinatura de
+# filtros + ultima_sync. Evita reprocessar os 119k registros a cada abertura
+# na CPU fraca da Render: a 1ª carga calcula, as seguintes (refresh, voltar
+# pro padrão) saem instantâneas. Invalidado naturalmente quando ultima_sync
+# muda (a chave inclui ela) e limitado em tamanho.
+_resultado_cache = {}
+_RESULTADO_CACHE_MAX = 60
+
+
+def _resultado_get(chave):
+    return _resultado_cache.get(chave)
+
+
+def _resultado_set(chave, valor):
+    if len(_resultado_cache) >= _RESULTADO_CACHE_MAX:
+        _resultado_cache.clear()
+    _resultado_cache[chave] = valor
+
+
+# Serializa o cálculo PESADO (119k registros). Evita que 2 requisições
+# simultâneas (ou request + pré-aquecimento) processem ao mesmo tempo,
+# dobrando memória/CPU. A 2ª espera e pega o resultado do cache.
+_compute_lock = threading.Lock()
+
 
 def _cache_invalido(arquivo):
     try:
@@ -860,6 +884,33 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
 # API — FINANCEIRO
 # =========================================================
 
+def _computar_financeiro(tipo, data_inicial, data_final, bases):
+    """Calcula (ou recupera do cache de resultado) o dashboard financeiro.
+    Usado pelo endpoint e pelo pré-aquecimento. Cache key inclui ultima_sync,
+    então invalida sozinho quando os dados mudam."""
+    anos = _anos_do_filtro(data_inicial, data_final)
+    chave = (f"fin|{bancodados.meta_get('ultima_sync')}|{anos}|{tipo}|"
+             f"{data_inicial}|{data_final}|{sorted(bases or [])}")
+    cached = _resultado_get(chave)
+    if cached is not None:
+        logger.info(f'[API/FIN] cache HIT ({tipo}, {data_inicial}->{data_final})')
+        return cached
+
+    with _compute_lock:
+        cached = _resultado_get(chave)          # re-checa: outra thread pode ter calculado
+        if cached is not None:
+            return cached
+        logger.info(f'[API/FIN] cache MISS — calculando | tipo={tipo} | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
+        # Carga em STREAMING (sem materializar os brutos) — evita OOM/502.
+        dados_processados = carregar_processados(anos)
+        dados_filtrados   = filtrar_dados(
+            dados_processados, tipo, data_inicial, data_final, bases
+        )
+        dashboard = gerar_dashboard_analitico(dados_filtrados, dados_processados, tipo)
+        _resultado_set(chave, dashboard)
+        return dashboard
+
+
 @app.route('/api/financeiro')
 @login_required
 def api_financeiro():
@@ -876,20 +927,7 @@ def api_financeiro():
         if data_final and not parse_date(data_final):
             data_final = None
 
-        anos = _anos_do_filtro(data_inicial, data_final)
-
-        logger.info(f'[API/FIN] tipo={tipo} | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
-
-        # Carga em STREAMING (sem materializar os brutos) — evita OOM/502.
-        dados_processados = carregar_processados(anos)
-        dados_filtrados   = filtrar_dados(
-            dados_processados, tipo, data_inicial, data_final, bases
-        )
-
-        logger.info(f'[API/FIN] processados={len(dados_processados)} filtrados={len(dados_filtrados)}')
-
-        dashboard = gerar_dashboard_analitico(dados_filtrados, dados_processados, tipo)
-        return jsonify(dashboard)
+        return jsonify(_computar_financeiro(tipo, data_inicial, data_final, bases))
 
     except Exception:
         logger.exception('[ERRO] api_financeiro')
@@ -1564,6 +1602,27 @@ def gerar_dashboard_eventos(dados_todos, data_inicial=None, data_final=None, bas
 # API — EVENTOS
 # =========================================================
 
+def _computar_eventos(data_inicial, data_final, bases):
+    """Calcula (ou recupera do cache de resultado) o dashboard de eventos."""
+    anos = _anos_do_filtro(data_inicial, data_final)
+    chave = (f"evt|{bancodados.meta_get('ultima_sync')}|{anos}|"
+             f"{data_inicial}|{data_final}|{sorted(bases or [])}")
+    cached = _resultado_get(chave)
+    if cached is not None:
+        logger.info(f'[API/EVENTOS] cache HIT ({data_inicial}->{data_final})')
+        return cached
+
+    with _compute_lock:
+        cached = _resultado_get(chave)
+        if cached is not None:
+            return cached
+        logger.info(f'[API/EVENTOS] cache MISS — calculando | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
+        dados_eventos = carregar_eventos(anos)
+        dashboard = gerar_dashboard_eventos(dados_eventos, data_inicial, data_final, bases)
+        _resultado_set(chave, dashboard)
+        return dashboard
+
+
 @app.route('/api/eventos')
 @login_required
 def api_eventos():
@@ -1577,19 +1636,7 @@ def api_eventos():
         if data_final and not parse_date(data_final):
             data_final = None
 
-        anos = _anos_do_filtro(data_inicial, data_final)
-
-        logger.info(f'[API/EVENTOS] {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
-
-        # Carga em STREAMING (sem materializar os brutos) — evita OOM/502.
-        dados_eventos = carregar_eventos(anos)
-        dashboard = gerar_dashboard_eventos(dados_eventos, data_inicial, data_final, bases)
-
-        logger.info(
-            f'[API/EVENTOS] eventos={len(dados_eventos)} '
-            f'adesoes={dashboard["cards"]["adesoes"]}'
-        )
-        return jsonify(dashboard)
+        return jsonify(_computar_eventos(data_inicial, data_final, bases))
 
     except Exception:
         logger.exception('[ERRO] api_eventos')
@@ -1751,7 +1798,9 @@ def _executar_sync(max_retries=10, retry_delay=120, forcar=False):
                 _cache['dados_processados'] = None
                 _cache['dados_eventos']     = None
                 _cache['dados_vendas']      = None
+                _resultado_cache.clear()
                 logger.info('[SIPROV] Cache invalidado apos sync.')
+                _warmup_async()  # re-aquece as visões padrão com os dados novos
                 return  # sucesso
             except Exception as e:
                 # Erro de rede no meio da sync → retry; outros erros → aborta
@@ -1848,6 +1897,7 @@ def _fechamento_mensal(ano=None, mes=None):
     _cache['dados_eventos'] = None
     _cache['dados_vendas'] = None
     _cache_adesoes['chave'] = None
+    _resultado_cache.clear()
     logger.info(f'[FECHAMENTO] Concluído para {mes:02d}/{ano}.')
 
 
@@ -1920,12 +1970,36 @@ def _iniciar_scheduler():
     threading.Thread(target=_sync_adesoes, daemon=True).start()
 
 # =========================================================
+# PRÉ-AQUECIMENTO DO CACHE DE RESULTADO
+# =========================================================
+def _preaquecer_dashboards():
+    """Pré-calcula as visões padrão (financeiro vencimento + eventos, sem
+    filtro) deixando o cache de resultado quente — assim a 1ª abertura já vem
+    rápida, mesmo após o serviço hibernar/reiniciar. Best-effort."""
+    try:
+        logger.info('[WARMUP] Pre-aquecendo dashboards padrao...')
+        _computar_financeiro('vencimento', None, None, [])
+        _computar_eventos(None, None, [])
+        logger.info('[WARMUP] Dashboards padrao prontos no cache.')
+    except Exception:
+        logger.exception('[WARMUP] Falha ao pre-aquecer (ignorado)')
+
+
+def _warmup_async():
+    threading.Thread(target=_preaquecer_dashboards, daemon=True).start()
+
+
+# =========================================================
 # AUTO-SYNC ATIVADO
 # =========================================================
 # Reativada: sync no startup (se dados desatualizados) +
 # scheduler cron 09:00 e 18:00 (America/Recife).
 # Para voltar ao modo JSON-only, comente a linha abaixo.
 _iniciar_scheduler()
+
+# Aquece o cache assim que o app sobe (independente do sync), pra 1ª carga
+# do chefe já vir do cache.
+_warmup_async()
 
 @app.route('/api/admin/sync', methods=['POST'])
 @login_required
@@ -2179,6 +2253,7 @@ def api_admin_db_congelar():
     n = bancodados.congelar_ano(ano)
     # Invalida cache para refletir mudança
     _cache['arquivo'] = None
+    _resultado_cache.clear()
     return jsonify({'status': 'ok', 'ano': ano, 'titulos_congelados': n})
 # =========================================================
 # START
