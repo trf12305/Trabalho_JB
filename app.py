@@ -301,6 +301,64 @@ def carregar_dados_json(anos=None):
     return _cache['dados_brutos']
 
 
+def _invalidar_cache_por_chave(anos=None):
+    """Normaliza os anos e invalida o cache se a chave (ultima_sync + anos)
+    mudou. Compartilhado pelas cargas em streaming. Retorna os anos."""
+    if anos is None:
+        anos = [datetime.now().year]
+    anos = sorted({int(a) for a in anos})
+    chave_sync = bancodados.meta_get('ultima_sync') or 'vazio'
+    chave = f"{chave_sync}|anos={','.join(map(str, anos))}"
+    if _cache['arquivo'] != chave:
+        _cache['arquivo']           = chave
+        _cache['dados_brutos']      = None
+        _cache['dados_processados'] = None
+        _cache['dados_eventos']     = None
+        _cache['dados_vendas']      = None
+    return anos
+
+
+def _stream_brutos(anos):
+    """Gera os registros brutos em STREAMING (lote a lote) — ou do JSON legado
+    se o banco estiver vazio. Nunca materializa todos os brutos de uma vez,
+    o que evita o estouro de memória (OOM/502) em datasets grandes."""
+    if bancodados.contar() == 0:
+        legado = _carregar_do_json_legado()
+        if legado:
+            logger.info(f'[DADOS] Banco vazio — importando {len(legado)} registros do JSON legado.')
+            bancodados.substituir_periodo(legado)
+        for item in (legado or []):
+            yield item
+    else:
+        for item in bancodados.iter_titulos(anos):
+            yield item
+
+
+def carregar_processados(anos=None):
+    """FINANCEIRO — lista enxuta JÁ processada, construída em STREAMING.
+    Substitui o par carregar_dados_json()+processar_dados_para_dash(): em vez
+    de carregar 119k brutos na memória e depois processar (pico ~700MB), lê
+    lote a lote e converte na hora (pico ~170MB). Fórmulas idênticas — só
+    muda COMO os dados chegam. Mesmo cache de antes."""
+    anos = _invalidar_cache_por_chave(anos)
+    if _cache['dados_processados'] is None:
+        _cache['dados_processados'] = [_mapear_registro(it) for it in _stream_brutos(anos)]
+        logger.info(f'[DADOS] {len(_cache["dados_processados"])} registros processados '
+                    f'(financeiro, streaming, anos={anos}).')
+    return _cache['dados_processados']
+
+
+def carregar_eventos(anos=None):
+    """EVENTOS — lista enxuta processada em STREAMING (mesma ideia do
+    carregar_processados, mas com o mapeamento de Eventos). Mesmo cache."""
+    anos = _invalidar_cache_por_chave(anos)
+    if _cache['dados_eventos'] is None:
+        _cache['dados_eventos'] = [_mapear_evento(it) for it in _stream_brutos(anos)]
+        logger.info(f'[DADOS] {len(_cache["dados_eventos"])} registros processados '
+                    f'(eventos, streaming, anos={anos}).')
+    return _cache['dados_eventos']
+
+
 # =========================================================
 # DEDUPLICAÇÃO
 # =========================================================
@@ -324,47 +382,49 @@ def _dedup_raw(dados):
 # PROCESSAMENTO — FINANCEIRO
 # =========================================================
 
+def _mapear_registro(item):
+    """Converte 1 registro bruto do Siprov no registro enxuto usado pelo
+    dashboard. Extraído de processar_dados_para_dash() para poder ser
+    reaproveitado na carga em streaming (carregar_processados), evitando
+    materializar todos os brutos na memória de uma vez. Lógica idêntica."""
+    associado = (
+        item.get('pessoa_nome_razao_social')
+        or item.get('associado_nome')
+        or item.get('beneficio_nome')
+        or item.get('titulo_associado')
+        or item.get('cliente_nome')
+        or 'N/A'
+    )
+
+    consultor_raw     = item.get('beneficio_consultor')    or ''
+    representante_raw = item.get('beneficio_representante') or ''
+
+    return {
+        'beneficio_sequencial': str(item.get('beneficio_sequencial') or '').strip(),
+        'titulo_parcela':       str(item.get('titulo_parcela')        or '').strip(),
+        'associado':  associado,
+        'unidade':    (item.get('unidade_nome_fantasia') or 'SEM UNIDADE').strip(),
+        'consultor':  extrair_nome(consultor_raw)    if consultor_raw    else 'SEM CONSULTOR',
+        'representante': extrair_nome(representante_raw) if representante_raw else 'SEM REPRESENTANTE',
+        'cidade':    (item.get('endereco_cidade') or '').strip(),
+        'uf':        (item.get('endereco_uf')     or '').strip(),
+        'plano':     (item.get('beneficio_planos_principais') or '').strip() or 'SEM PLANO',
+        'categoria_veiculo': (item.get('veiculo_categoria') or '').strip().upper(),
+        'valor_veiculo':     to_float(item.get('veiculo_valor_veiculo')),
+        'tipo_titulo': (item.get('titulo_tipo_titulo') or 'N/A').strip(),
+        'situacao':  (item.get('titulo_situacao_titulo') or '').strip().upper(),
+        'data_vencimento': item.get('titulo_data_vencimento'),
+        'data_liquidacao': item.get('liquidacao_data_liquidacao'),
+        'data_adesao':     item.get('beneficio_data_adesao'),
+        'valor_titulo':    to_float(item.get('titulo_valor')),
+        'valor_liquidado': to_float(item.get('liquidacao_valor_liquidado')),
+        'forma_pagamento': (item.get('liquidacao_tipo_liquidacao') or 'N/A').strip(),
+    }
+
+
 def processar_dados_para_dash(dados_originais):
     dados_sem_dup = _dedup_raw(dados_originais)
-    registros = []
-
-    for item in dados_sem_dup:
-        associado = (
-            item.get('pessoa_nome_razao_social')
-            or item.get('associado_nome')
-            or item.get('beneficio_nome')
-            or item.get('titulo_associado')
-            or item.get('cliente_nome')
-            or 'N/A'
-        )
-
-        consultor_raw     = item.get('beneficio_consultor')    or ''
-        representante_raw = item.get('beneficio_representante') or ''
-
-        registro = {
-            'beneficio_sequencial': str(item.get('beneficio_sequencial') or '').strip(),
-            'titulo_parcela':       str(item.get('titulo_parcela')        or '').strip(),
-            'associado':  associado,
-            'unidade':    (item.get('unidade_nome_fantasia') or 'SEM UNIDADE').strip(),
-            'consultor':  extrair_nome(consultor_raw)    if consultor_raw    else 'SEM CONSULTOR',
-            'representante': extrair_nome(representante_raw) if representante_raw else 'SEM REPRESENTANTE',
-            'cidade':    (item.get('endereco_cidade') or '').strip(),
-            'uf':        (item.get('endereco_uf')     or '').strip(),
-            'plano':     (item.get('beneficio_planos_principais') or '').strip() or 'SEM PLANO',
-            'categoria_veiculo': (item.get('veiculo_categoria') or '').strip().upper(),
-            'valor_veiculo':     to_float(item.get('veiculo_valor_veiculo')),
-            'tipo_titulo': (item.get('titulo_tipo_titulo') or 'N/A').strip(),
-            'situacao':  (item.get('titulo_situacao_titulo') or '').strip().upper(),
-            'data_vencimento': item.get('titulo_data_vencimento'),
-            'data_liquidacao': item.get('liquidacao_data_liquidacao'),
-            'data_adesao':     item.get('beneficio_data_adesao'),
-            'valor_titulo':    to_float(item.get('titulo_valor')),
-            'valor_liquidado': to_float(item.get('liquidacao_valor_liquidado')),
-            'forma_pagamento': (item.get('liquidacao_tipo_liquidacao') or 'N/A').strip(),
-        }
-        registros.append(registro)
-
-    return registros
+    return [_mapear_registro(item) for item in dados_sem_dup]
 
 
 # =========================================================
@@ -820,12 +880,8 @@ def api_financeiro():
 
         logger.info(f'[API/FIN] tipo={tipo} | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
 
-        dados_brutos = carregar_dados_json(anos)
-
-        if _cache['dados_processados'] is None:
-            _cache['dados_processados'] = processar_dados_para_dash(dados_brutos)
-
-        dados_processados = _cache['dados_processados']
+        # Carga em STREAMING (sem materializar os brutos) — evita OOM/502.
+        dados_processados = carregar_processados(anos)
         dados_filtrados   = filtrar_dados(
             dados_processados, tipo, data_inicial, data_final, bases
         )
@@ -953,12 +1009,10 @@ def api_financeiro_export():
             tipo = 'vencimento'
 
         anos = _anos_do_filtro(data_inicial, data_final)
-        dados_brutos = carregar_dados_json(anos)
-        if _cache['dados_processados'] is None:
-            _cache['dados_processados'] = processar_dados_para_dash(dados_brutos)
+        dados_processados = carregar_processados(anos)
 
         dados_filtrados = filtrar_dados(
-            _cache['dados_processados'], tipo, data_inicial, data_final, bases
+            dados_processados, tipo, data_inicial, data_final, bases
         )
         dados_ord = sorted(dados_filtrados, key=lambda x: x.get('data_filtro') or '', reverse=True)
 
@@ -1310,44 +1364,44 @@ def api_vendas_export():
 # PROCESSAMENTO — EVENTOS / ADESÕES
 # =========================================================
 
+def _mapear_evento(item):
+    """Converte 1 registro bruto no registro de Eventos. Extraído de
+    processar_dados_eventos() para reuso na carga em streaming. Idêntico."""
+    data_venc = parse_date(item.get('titulo_data_vencimento'))
+    data_liq  = parse_date(item.get('liquidacao_data_liquidacao'))
+
+    tempo_resposta = None
+    if data_venc and data_liq:
+        tempo_resposta = (data_liq - data_venc).days
+
+    return {
+        'beneficio_sequencial': str(item.get('beneficio_sequencial') or '').strip(),
+        'titulo_parcela':       str(item.get('titulo_parcela')        or '').strip(),
+        'associado':     (item.get('pessoa_nome_razao_social') or 'N/A').strip(),
+        'unidade':       (item.get('unidade_nome_fantasia')    or 'SEM UNIDADE').strip(),
+        'consultor':     extrair_nome(item.get('beneficio_consultor')    or '') or 'SEM CONSULTOR',
+        'representante': extrair_nome(item.get('beneficio_representante') or '') or 'SEM REPRESENTANTE',
+        'uf':    (item.get('endereco_uf')     or '').strip(),
+        'cidade':(item.get('endereco_cidade') or '').strip(),
+        'plano':  (item.get('beneficio_planos_principais') or '').strip() or 'SEM PLANO',
+        'situacao':(item.get('titulo_situacao_titulo') or '').strip().upper(),
+        'data_adesao':     str(item.get('beneficio_data_adesao')      or ''),
+        'data_vencimento': str(item.get('titulo_data_vencimento')     or ''),
+        'data_liquidacao': str(item.get('liquidacao_data_liquidacao') or ''),
+        'mensalidade':    to_float(item.get('beneficio_valor_mensalidade')),
+        'valor_titulo':   to_float(item.get('titulo_valor')),
+        'valor_liquidado':to_float(item.get('liquidacao_valor_liquidado')),
+        'valor_veiculo':  to_float(item.get('veiculo_valor_veiculo')),
+        'veiculo_marca':  (item.get('veiculo_marca_veiculo') or '').strip(),
+        'veiculo_categoria': (item.get('veiculo_categoria') or '').strip(),
+        'tempo_resposta': tempo_resposta,
+        'pontual': tempo_resposta is not None and tempo_resposta <= 0,
+    }
+
+
 def processar_dados_eventos(dados_originais):
     dados_sem_dup = _dedup_raw(dados_originais)
-    registros = []
-
-    for item in dados_sem_dup:
-        data_venc = parse_date(item.get('titulo_data_vencimento'))
-        data_liq  = parse_date(item.get('liquidacao_data_liquidacao'))
-
-        tempo_resposta = None
-        if data_venc and data_liq:
-            tempo_resposta = (data_liq - data_venc).days
-
-        registro = {
-            'beneficio_sequencial': str(item.get('beneficio_sequencial') or '').strip(),
-            'titulo_parcela':       str(item.get('titulo_parcela')        or '').strip(),
-            'associado':     (item.get('pessoa_nome_razao_social') or 'N/A').strip(),
-            'unidade':       (item.get('unidade_nome_fantasia')    or 'SEM UNIDADE').strip(),
-            'consultor':     extrair_nome(item.get('beneficio_consultor')    or '') or 'SEM CONSULTOR',
-            'representante': extrair_nome(item.get('beneficio_representante') or '') or 'SEM REPRESENTANTE',
-            'uf':    (item.get('endereco_uf')     or '').strip(),
-            'cidade':(item.get('endereco_cidade') or '').strip(),
-            'plano':  (item.get('beneficio_planos_principais') or '').strip() or 'SEM PLANO',
-            'situacao':(item.get('titulo_situacao_titulo') or '').strip().upper(),
-            'data_adesao':     str(item.get('beneficio_data_adesao')      or ''),
-            'data_vencimento': str(item.get('titulo_data_vencimento')     or ''),
-            'data_liquidacao': str(item.get('liquidacao_data_liquidacao') or ''),
-            'mensalidade':    to_float(item.get('beneficio_valor_mensalidade')),
-            'valor_titulo':   to_float(item.get('titulo_valor')),
-            'valor_liquidado':to_float(item.get('liquidacao_valor_liquidado')),
-            'valor_veiculo':  to_float(item.get('veiculo_valor_veiculo')),
-            'veiculo_marca':  (item.get('veiculo_marca_veiculo') or '').strip(),
-            'veiculo_categoria': (item.get('veiculo_categoria') or '').strip(),
-            'tempo_resposta': tempo_resposta,
-            'pontual': tempo_resposta is not None and tempo_resposta <= 0,
-        }
-        registros.append(registro)
-
-    return registros
+    return [_mapear_evento(item) for item in dados_sem_dup]
 
 
 # =========================================================
@@ -1527,12 +1581,8 @@ def api_eventos():
 
         logger.info(f'[API/EVENTOS] {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
 
-        dados_brutos = carregar_dados_json(anos)
-
-        if _cache['dados_eventos'] is None:
-            _cache['dados_eventos'] = processar_dados_eventos(dados_brutos)
-
-        dados_eventos = _cache['dados_eventos']
+        # Carga em STREAMING (sem materializar os brutos) — evita OOM/502.
+        dados_eventos = carregar_eventos(anos)
         dashboard = gerar_dashboard_eventos(dados_eventos, data_inicial, data_final, bases)
 
         logger.info(
@@ -1552,11 +1602,9 @@ def api_eventos_export():
         data_final   = request.args.get('data_final')   or None
         bases        = request.args.getlist('bases')
         anos = _anos_do_filtro(data_inicial, data_final)
-        dados_brutos = carregar_dados_json(anos)
-        if _cache['dados_eventos'] is None:
-            _cache['dados_eventos'] = processar_dados_eventos(dados_brutos)
+        dados_eventos = carregar_eventos(anos)
         dashboard = gerar_dashboard_eventos(
-            _cache['dados_eventos'], data_inicial, data_final, bases
+            dados_eventos, data_inicial, data_final, bases
         )
         tabela = dashboard.get('tabela', [])
         output = io.StringIO()

@@ -310,6 +310,53 @@ def ler_titulos(ano=None, mes=None, incluir_congelados=True):
     return [json.loads(r['raw_json']) for r in rows]
 
 
+def iter_titulos(anos=None, batch=5000):
+    """Versão STREAMING de ler_titulos: gera os registros brutos (dicts do
+    raw_json) lote a lote, SEM carregar tudo na memória de uma vez.
+
+    Essencial para volumes grandes (ex.: 119k títulos do ano) em ambientes
+    com pouca RAM (Render free 512MB) — evita o OOM/502. O consumidor itera
+    e converte cada registro na hora, descartando o bruto.
+
+    - PostgreSQL: usa cursor nomeado (server-side), que transmite em blocos.
+    - SQLite: fetchmany por lote.
+    """
+    where = ''
+    params = []
+    if anos:
+        anos_int = sorted({int(a) for a in anos})
+        if USE_POSTGRES:
+            where = ' WHERE ano = ANY(%s)'
+            params = [anos_int]
+        else:
+            marks = ','.join('?' for _ in anos_int)
+            where = f' WHERE ano IN ({marks})'
+            params = anos_int
+    sql = 'SELECT raw_json FROM titulos' + where
+
+    conn = _conn()
+    try:
+        if USE_POSTGRES:
+            cur = conn.cursor(name='jb_stream_titulos',
+                              cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.itersize = batch
+            cur.execute(sql, params)
+            for row in cur:
+                yield json.loads(row['raw_json'])
+            cur.close()
+        else:
+            cur = _cursor(conn)
+            cur.execute(sql, params)
+            while True:
+                rows = cur.fetchmany(batch)
+                if not rows:
+                    break
+                for row in rows:
+                    yield json.loads(row['raw_json'])
+    finally:
+        conn.close()
+
+
 # =========================================================
 # CONGELAMENTO
 # =========================================================
