@@ -1544,8 +1544,6 @@ def api_eventos():
     except Exception:
         logger.exception('[ERRO] api_eventos')
         return jsonify({'erro': 'Falha ao processar dados de eventos.'}), 500
-
-
 @app.route('/api/eventos/export')
 @login_required
 def api_eventos_export():
@@ -1553,17 +1551,14 @@ def api_eventos_export():
         data_inicial = request.args.get('data_inicial') or None
         data_final   = request.args.get('data_final')   or None
         bases        = request.args.getlist('bases')
-
         anos = _anos_do_filtro(data_inicial, data_final)
         dados_brutos = carregar_dados_json(anos)
         if _cache['dados_eventos'] is None:
             _cache['dados_eventos'] = processar_dados_eventos(dados_brutos)
-
         dashboard = gerar_dashboard_eventos(
             _cache['dados_eventos'], data_inicial, data_final, bases
         )
         tabela = dashboard.get('tabela', [])
-
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(['Data Adesao', 'Associado', 'Unidade', 'Plano', 'UF', 'Mensalidade'])
@@ -1576,22 +1571,17 @@ def api_eventos_export():
                 d.get('uf', ''),
                 to_float(d.get('mensalidade', 0)),
             ])
-
         response = make_response('﻿' + output.getvalue())
         response.headers['Content-Disposition'] = 'attachment; filename=eventos_export.csv'
         response.headers['Content-Type'] = 'text/csv; charset=utf-8'
         logger.info(f'[EXPORT/EVENTOS] {len(tabela)} linhas exportadas')
         return response
-
     except Exception:
         logger.exception('[ERRO] api_eventos_export')
         return jsonify({'erro': 'Falha ao exportar.'}), 500
-
-
 # =========================================================
 # HEALTH CHECK
 # =========================================================
-
 @app.route('/health')
 def health():
     return jsonify({
@@ -1599,67 +1589,47 @@ def health():
         'timestamp': datetime.now().isoformat(),
         'versao':    '2.0.0',
     })
-
-
 # =========================================================
 # LOGIN / ROTAS
 # =========================================================
-
 @app.route('/')
 def home():
     if session.get('logado'):
         return redirect('/financeiro')
     return render_template('login.html')
-
-
 @app.route('/login', methods=['POST'])
 @limiter.limit('10 per minute')
 def login():
     usuario = (request.form.get('usuario') or '').strip()
     senha   = (request.form.get('senha')   or '').strip()
-
     if usuario == ADMIN_USER and senha == ADMIN_PASS:
         session.permanent = True
         session['logado'] = True
         logger.info(f'[LOGIN] Acesso concedido: usuario={usuario!r}')
         return redirect('/financeiro')
-
     logger.warning(f'[LOGIN] Falha de autenticacao: usuario={usuario!r}')
     return redirect('/?erro=1')
-
-
 @app.route('/financeiro')
 @login_required
 def financeiro():
     return render_template('dash_financeiro.html')
-
-
 @app.route('/eventos')
 @login_required
 def eventos():
     return render_template('dash_eventos.html')
-
-
 @app.route('/vendas')
 @login_required
 def vendas():
     return render_template('dash_vendas.html')
-
-
 @app.route('/logout')
 def logout():
     session.clear()
     logger.info('[LOGOUT] Sessao encerrada')
     return redirect('/')
-
-
 # =========================================================
 # SYNC SIPROV — scheduler automático
 # =========================================================
-
 _sync_lock = threading.Lock()
-
-
 def _ha_internet(host='acesso.siprov.com.br', porta=443, timeout=5):
     """Testa se o Siprov é alcançável (DNS + conexão). Usado para o retry
     pós-boot, quando o Wi-Fi pode ainda não ter subido."""
@@ -1669,14 +1639,10 @@ def _ha_internet(host='acesso.siprov.com.br', porta=443, timeout=5):
         return True
     except OSError:
         return False
-
-
 # Horários agendados da sync (America/Recife). Editável aqui.
 # O chefe abre os dashboards às 08h e 18h → puxamos os relatórios 30min antes,
 # para já estar tudo pronto quando ele abrir. Financeiro e adesão no MESMO horário.
 SYNC_SLOTS = ((7, 30), (17, 30))  # 07:30 e 17:30
-
-
 def _slot_ja_coberto(ultima_iso, slots=SYNC_SLOTS):
     """True se JÁ houve sync desde o último horário agendado (ex.: 07:30/17:30)
     que já passou hoje. Serve para NÃO re-sincronizar a cada restart/abertura do
@@ -1700,8 +1666,6 @@ def _slot_ja_coberto(ultima_iso, slots=SYNC_SLOTS):
         slot_dt = (agora - timedelta(days=1)).replace(
             hour=h, minute=m, second=0, microsecond=0)
     return ult >= slot_dt
-
-
 def _executar_sync(max_retries=10, retry_delay=120, forcar=False):
     """Executa a sync. Se falhar por REDE (sem internet, comum logo após o
     boot), aguarda e tenta de novo — até max_retries vezes, com retry_delay
@@ -1716,7 +1680,6 @@ def _executar_sync(max_retries=10, retry_delay=120, forcar=False):
     if not _sync_lock.acquire(blocking=False):
         logger.info('[SIPROV] Sync ja em andamento, ignorando.')
         return
-
     import time as _time
     try:
         from siprov_sync import sincronizar
@@ -1760,8 +1723,6 @@ def _executar_sync(max_retries=10, retry_delay=120, forcar=False):
                 return
     finally:
         _sync_lock.release()
-
-
 def _congelar_ano_anterior():
     """Job anual (1º de Janeiro): congela o ano que acabou de fechar,
     protegendo-o de alterações futuras (histórico para YoY)."""
@@ -1771,8 +1732,6 @@ def _congelar_ano_anterior():
         logger.info(f'[DB] Congelamento anual: ano {ano_fechado} protegido ({n} títulos).')
     except Exception:
         logger.exception('[DB] Falha ao congelar ano anterior')
-
-
 def _sync_adesoes(forcar=False):
     """Sync da fonte de Vendas (adesões). Separada do financeiro.
     Mesma guarda por slot: não re-sincroniza a cada restart/abertura."""
@@ -1786,8 +1745,6 @@ def _sync_adesoes(forcar=False):
         logger.info('[ADESOES] Cache invalidado apos sync.')
     except Exception:
         logger.exception('[ADESOES] Falha na sync de adesoes')
-
-
 # =========================================================
 # FECHAMENTO MENSAL — geral, para TODOS os dashboards (atuais e futuros)
 # =========================================================
@@ -1808,8 +1765,6 @@ def _fontes_arquivaveis():
             'congelar_mes': lambda ano, mes: db_adesoes.congelar_mes(ano, mes),
         },
     ]
-
-
 def _fechamento_mensal(ano=None, mes=None):
     """Roda no dia 1º de cada mês: para o mês que FECHOU, em TODAS as fontes:
        (1) busca os dados finais do mês no Siprov,
@@ -1822,7 +1777,6 @@ def _fechamento_mensal(ano=None, mes=None):
             ano, mes = hoje.year - 1, 12
         else:
             ano, mes = hoje.year, hoje.month - 1
-
     logger.info(f'[FECHAMENTO] === Fechando {mes:02d}/{ano} em todas as fontes ===')
     for fonte in _fontes_arquivaveis():
         nome = fonte['nome']
@@ -1840,7 +1794,6 @@ def _fechamento_mensal(ano=None, mes=None):
             logger.info(f'[FECHAMENTO] {nome}: {mes:02d}/{ano} CONGELADO ({n} registros).')
         except Exception:
             logger.exception(f'[FECHAMENTO] {nome}: falha ao congelar')
-
     # Invalida todos os caches para refletir o congelamento
     _cache['dados_brutos'] = None
     _cache['dados_processados'] = None
@@ -1850,7 +1803,14 @@ def _fechamento_mensal(ano=None, mes=None):
     logger.info(f'[FECHAMENTO] Concluído para {mes:02d}/{ano}.')
 
 
+# Estado do agendador, exposto em /admin/debug para diagnosticar produção.
+# Valores: 'nao_iniciado' | 'JB_NO_SYNC' | 'sem_credenciais' |
+#          'sem_apscheduler' | 'ativo'
+_SCHEDULER_STATUS = 'nao_iniciado'
+
+
 def _iniciar_scheduler():
+    global _SCHEDULER_STATUS
     # Garante que o banco existe antes de qualquer operação
     try:
         bancodados.init_db()
@@ -1862,10 +1822,12 @@ def _iniciar_scheduler():
     # Siprov (sem scheduler 09h/18h e sem sync no startup). Serve só os dados
     # já existentes no banco. Útil para rodar offline/local sem tocar na API.
     if os.environ.get('JB_NO_SYNC') == '1':
+        _SCHEDULER_STATUS = 'JB_NO_SYNC'
         logger.warning('[SIPROV] JB_NO_SYNC=1 — sync DESATIVADO (sem scheduler e sem startup sync).')
         return
 
     if not os.environ.get('SIPROV_USUARIO') or not os.environ.get('SIPROV_SENHA'):
+        _SCHEDULER_STATUS = 'sem_credenciais'
         logger.warning('[SIPROV] Credenciais nao configuradas — sync automatico desativado.')
         return
 
@@ -1873,6 +1835,7 @@ def _iniciar_scheduler():
         from apscheduler.schedulers.background import BackgroundScheduler
         import atexit
     except ImportError:
+        _SCHEDULER_STATUS = 'sem_apscheduler'
         logger.warning('[SIPROV] APScheduler nao instalado — sync automatico desativado. Execute: pip install APScheduler')
         return
 
@@ -1896,6 +1859,7 @@ def _iniciar_scheduler():
     scheduler.add_job(_congelar_ano_anterior, 'cron', month=1, day=1, hour=2, minute=0,
                       id='congelar_anual', **_job_defaults)
     scheduler.start()
+    _SCHEDULER_STATUS = 'ativo'
     atexit.register(lambda: scheduler.shutdown(wait=False))
     logger.info('[SIPROV] Scheduler: financeiro+adesoes 07:30 e 17:30, '
                 'fechamento mensal dia 1 03h, congelamento anual 01/Jan.')
@@ -1920,8 +1884,12 @@ _iniciar_scheduler()
 def api_admin_sync():
     if os.environ.get('JB_NO_SYNC') == '1':
         return jsonify({'status': 'sync desativado (JB_NO_SYNC=1)'}), 503
+    # Dispara FINANCEIRO e ADESÕES juntos, em paralelo — mesmos dados que o
+    # scheduler puxa às 07:30/17:30. Assim o botão manual atualiza as duas
+    # fontes de uma vez (relatório financeiro + relatório de adesão no Siprov).
     threading.Thread(target=lambda: _executar_sync(forcar=True), daemon=True).start()
-    return jsonify({'status': 'sync iniciado em background'})
+    threading.Thread(target=lambda: _sync_adesoes(forcar=True), daemon=True).start()
+    return jsonify({'status': 'sync iniciado em background (financeiro + adesoes)'})
 
 
 @app.route('/api/admin/sync/adesoes', methods=['POST'])
@@ -1981,6 +1949,25 @@ def admin_debug():
         'database_url_prefixo': (os.environ.get('DATABASE_URL', '')[:25] + '...') if os.environ.get('DATABASE_URL') else None,
         'vars_banco': sorted([k for k in os.environ if any(
             t in k.upper() for t in ('DATABASE', 'PG', 'POSTGRES'))]),
+    }
+    # ---- Diagnóstico do SYNC automático (por que pega ou não pega) ----
+    _usr = os.environ.get('SIPROV_USUARIO', '')
+    info['sync'] = {
+        'scheduler_status': _SCHEDULER_STATUS,   # ativo | sem_credenciais | JB_NO_SYNC | sem_apscheduler
+        'JB_NO_SYNC': os.environ.get('JB_NO_SYNC'),
+        'tem_SIPROV_USUARIO': bool(_usr),
+        'SIPROV_USUARIO': (_usr[:3] + '***@' + _usr.split('@')[-1]) if '@' in _usr else ('***' if _usr else None),
+        'tem_SIPROV_SENHA': bool(os.environ.get('SIPROV_SENHA')),
+        'janela': {
+            'SIPROV_DATA_INICIAL': os.environ.get('SIPROV_DATA_INICIAL'),
+            'SIPROV_DATA_FINAL':   os.environ.get('SIPROV_DATA_FINAL'),
+            'SIPROV_MESES_FUTUROS': os.environ.get('SIPROV_MESES_FUTUROS'),
+            'SIPROV_MESES_BACK':    os.environ.get('SIPROV_MESES_BACK'),
+            'SIPROV_SITUACOES':     os.environ.get('SIPROV_SITUACOES'),
+            'SIPROV_TIPOS':         os.environ.get('SIPROV_TIPOS'),
+        },
+        'ultima_sync': bancodados.meta_get('ultima_sync'),
+        'horarios_agendados': '07:30 e 17:30 (America/Recife)',
     }
     data_dir = os.path.join(BASE_DIR, 'data')
     info['data_dir'] = data_dir

@@ -108,31 +108,8 @@
 
 <body>
 
-<!-- LOGO JB PROTEÇÃO -->
-<div style="margin:16px 20px 0;text-align:center;">
-  <div style="display:inline-flex;align-items:center;gap:24px;background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(251,146,60,.05));border:1px solid rgba(249,115,22,.22);border-radius:24px;padding:16px 36px;box-shadow:0 0 50px rgba(249,115,22,.1),0 4px 24px rgba(0,0,0,.3);">
-    <img src="/static/img/logo_jb_trim.png" alt="JB Proteção Patrimonial" style="height:78px;width:auto;border-radius:14px;display:block;box-shadow:0 6px 22px rgba(0,0,0,.45);">
-    <div style="text-align:left;">
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:31px;font-weight:900;line-height:1.02;letter-spacing:-0.5px;">
-        <span style="background:linear-gradient(90deg,#fb923c,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">JB</span><span style="color:rgba(255,255,255,.96);margin-left:9px;">PROTEÇÃO</span>
-      </div>
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:24px;font-weight:800;letter-spacing:.05em;color:rgba(255,255,255,.94);line-height:1.06;margin-top:1px;">PATRIMONIAL</div>
-      <div style="font-family:'Plus Jakarta Sans',Arial,sans-serif;font-size:9px;letter-spacing:.34em;color:rgba(148,163,184,.7);font-weight:700;text-transform:uppercase;margin-top:8px;">
-        Plataforma de Gestão Comercial
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- NAV SUPERIOR -->
-<nav style="margin:16px 20px 0; background:rgba(15,23,42,.62); border:1px solid rgba(255,255,255,.05); border-radius:18px; padding:10px 16px; display:flex; align-items:center; justify-content:space-between;">
-    <div style="display:flex; gap:8px;">
-        <a href="/financeiro" style="background:#1e293b; color:white; padding:6px 12px; border-radius:8px; font-size:11px; font-weight:700; text-decoration:none;">Financeiro</a>
-        <a href="/eventos" style="background:#f97316; color:black; padding:6px 12px; border-radius:8px; font-size:11px; font-weight:900; text-decoration:none;">Eventos</a>
-        <a href="/vendas" style="background:#1e293b; color:white; padding:6px 12px; border-radius:8px; font-size:11px; font-weight:700; text-decoration:none;">Vendas</a>
-    </div>
-    <a href="/logout" style="color:#64748b; font-size:11px; font-weight:700; text-decoration:none;">Sair</a>
-</nav>
+<!-- ===== SIDEBAR LATERAL JB ===== -->
+{% include '_sidebar.html' %}
 
 <!-- OVERLAY DE CARREGAMENTO -->
 <div
@@ -160,20 +137,6 @@
     <header class="mb-5 relative z-50">
 
         <div class="glass p-4 flex items-center justify-between flex-wrap gap-4">
-
-            <div class="flex items-center gap-4">
-                <div class="w-11 h-11 rounded-xl bg-orange-500 flex items-center justify-center font-black text-black">
-                    JB
-                </div>
-                <div>
-                    <h1 class="text-2xl font-black uppercase title-gradient tracking-tight">
-                        Eventos
-                    </h1>
-                    <p class="text-[10px] uppercase tracking-[3px] text-slate-500 font-bold">
-                        Dashboard de Eventos · Ritmo Comercial
-                    </p>
-                </div>
-            </div>
 
             <div class="flex flex-wrap gap-3 items-end">
 

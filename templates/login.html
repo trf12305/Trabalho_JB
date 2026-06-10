@@ -6,9 +6,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Login</title>
+    <title>JB Proteção — Acesso Seguro</title>
 
     <style>
+
+        :root{
+            --bg:#07090f;
+            --panel:#0d111a;
+            --panel-2:#11151f;
+            --field:#161b27;
+            --line:rgba(255,255,255,.07);
+            --orange:#ff6b00;
+            --orange-soft:#ff8a33;
+            --text:#ffffff;
+            --muted:#7e889b;
+            --label:#b8c0d0;
+            --danger:#f87171;
+        }
 
         *{
             margin:0;
@@ -18,137 +32,398 @@
 
         body{
             width:100%;
-            height:100vh;
+            min-height:100vh;
             display:flex;
             align-items:center;
             justify-content:center;
-            background:#07090f;
-            font-family:Arial;
+            padding:24px;
+            background:var(--bg);
+            font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+            color:var(--text);
             overflow:hidden;
         }
 
+        /* grade técnica de fundo, com leve deriva */
         body::before{
+            content:'';
+            position:fixed;
+            inset:-2px;
+            background:
+                linear-gradient(rgba(255,107,0,.045) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,107,0,.045) 1px, transparent 1px);
+            background-size:42px 42px;
+            mask-image:radial-gradient(ellipse 80% 80% at 50% 40%, #000 30%, transparent 100%);
+            animation:drift 24s linear infinite;
+            pointer-events:none;
+        }
+
+        @keyframes drift{
+            from{background-position:0 0,0 0;}
+            to{background-position:42px 42px,42px 42px;}
+        }
+
+        .ambient{
+            position:fixed;
+            inset:0;
+            pointer-events:none;
+        }
+        .ambient::before,
+        .ambient::after{
+            content:'';
+            position:absolute;
+            border-radius:50%;
+            filter:blur(8px);
+        }
+        .ambient::before{
+            top:-220px;
+            left:50%;
+            transform:translateX(-50%);
+            width:760px;
+            height:420px;
+            background:radial-gradient(ellipse, rgba(255,107,0,.16) 0%, transparent 70%);
+            animation:pulse 7s ease-in-out infinite;
+        }
+        .ambient::after{
+            bottom:-260px;
+            right:-120px;
+            width:520px;
+            height:520px;
+            background:radial-gradient(circle, rgba(255,107,0,.08) 0%, transparent 70%);
+        }
+
+        @keyframes pulse{
+            0%,100%{opacity:.7;}
+            50%{opacity:1;}
+        }
+
+        /* ====== CARTÃO PRINCIPAL (split) ====== */
+        .shell{
+            position:relative;
+            z-index:2;
+            width:100%;
+            max-width:920px;
+            display:grid;
+            grid-template-columns:1.05fr 1fr;
+            background:linear-gradient(180deg, rgba(255,255,255,.02), transparent), var(--panel);
+            border:1px solid var(--line);
+            border-radius:24px;
+            overflow:hidden;
+            box-shadow:0 30px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,107,0,.05);
+            animation:rise .6s cubic-bezier(.2,.8,.2,1) both;
+        }
+
+        @keyframes rise{
+            from{opacity:0; transform:translateY(18px);}
+            to{opacity:1; transform:translateY(0);}
+        }
+
+        /* ====== PAINEL DE MARCA (esquerda) ====== */
+        .brand{
+            position:relative;
+            padding:44px 40px;
+            display:flex;
+            flex-direction:column;
+            background:
+                radial-gradient(900px 500px at -10% -10%, rgba(255,107,0,.10), transparent 55%),
+                linear-gradient(160deg, #0c1019 0%, #0a0d15 100%);
+            border-right:1px solid var(--line);
+            overflow:hidden;
+        }
+        .brand::after{
             content:'';
             position:absolute;
             inset:0;
             background:
-                linear-gradient(rgba(255,107,0,.04) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,107,0,.04) 1px, transparent 1px);
-            background-size:40px 40px;
+                linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+            background-size:30px 30px;
+            mask-image:linear-gradient(180deg, transparent, #000 40%, transparent 95%);
+            pointer-events:none;
         }
 
-        .glow{
-            position:absolute;
-            top:-200px;
-            left:50%;
-            transform:translateX(-50%);
-            width:700px;
-            height:400px;
-            background:
-                radial-gradient(
-                    ellipse,
-                    rgba(255,107,0,.14) 0%,
-                    transparent 70%
-                );
-        }
-
-        .login-box{
+        .brand-top{
             position:relative;
-            z-index:2;
-            width:400px;
-            background:#11151f;
-            border:1px solid rgba(255,255,255,.06);
-            border-radius:20px;
-            padding:40px;
-            box-shadow:0 0 30px rgba(0,0,0,.45);
-        }
-
-        .logo{
             display:flex;
             align-items:center;
             gap:14px;
-            margin-bottom:30px;
+            z-index:1;
         }
 
         .logo-icon{
-            width:55px;
-            height:55px;
-            background:#ff6b00;
-            border-radius:14px;
+            width:52px;
+            height:52px;
+            background:linear-gradient(145deg, var(--orange-soft), var(--orange));
+            border-radius:15px;
             display:flex;
             align-items:center;
             justify-content:center;
-            color:#000;
-            font-size:1.4rem;
+            color:#0a0d15;
+            font-size:1.25rem;
             font-weight:800;
+            letter-spacing:.5px;
+            box-shadow:0 8px 24px rgba(255,107,0,.35), inset 0 1px 0 rgba(255,255,255,.4);
         }
 
-        .logo-text{
-            color:white;
-            font-size:1.2rem;
+        .logo-text b{
+            display:block;
+            font-size:1.15rem;
             font-weight:700;
+            letter-spacing:.2px;
         }
-
         .logo-text span{
             display:block;
-            color:#ff6b00;
-            font-size:.8rem;
-            margin-top:4px;
+            margin-top:3px;
+            color:var(--orange);
+            font-size:.72rem;
+            font-weight:600;
+            text-transform:uppercase;
+            letter-spacing:2px;
         }
 
-        .title{
-            color:white;
-            font-size:1.5rem;
+        .brand-head{
+            position:relative;
+            z-index:1;
+            margin-top:46px;
+        }
+        .brand-head h1{
+            font-size:1.7rem;
+            line-height:1.25;
             font-weight:700;
-            margin-bottom:8px;
+            letter-spacing:-.4px;
+        }
+        .brand-head h1 em{
+            color:var(--orange);
+            font-style:normal;
+        }
+        .brand-head p{
+            margin-top:12px;
+            color:var(--muted);
+            font-size:.92rem;
+            line-height:1.5;
+            max-width:330px;
         }
 
+        .features{
+            position:relative;
+            z-index:1;
+            margin-top:30px;
+            display:flex;
+            flex-direction:column;
+            gap:14px;
+        }
+        .feature{
+            display:flex;
+            align-items:center;
+            gap:12px;
+            font-size:.88rem;
+            color:#cdd4e0;
+        }
+        .feature .ic{
+            width:34px;
+            height:34px;
+            flex:0 0 34px;
+            border-radius:10px;
+            background:rgba(255,107,0,.10);
+            border:1px solid rgba(255,107,0,.22);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+        }
+        .feature .ic svg{width:17px;height:17px;stroke:var(--orange);}
+
+        .brand-foot{
+            position:relative;
+            z-index:1;
+            margin-top:auto;
+            padding-top:30px;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            font-size:.74rem;
+            color:var(--muted);
+            font-family:ui-monospace,"Cascadia Code",Consolas,monospace;
+        }
+        .status{
+            display:flex;
+            align-items:center;
+            gap:8px;
+        }
+        .dot{
+            width:8px;
+            height:8px;
+            border-radius:50%;
+            background:#2ecc71;
+            box-shadow:0 0 0 0 rgba(46,204,113,.55);
+            animation:ping 1.8s ease-out infinite;
+        }
+        @keyframes ping{
+            0%{box-shadow:0 0 0 0 rgba(46,204,113,.5);}
+            70%{box-shadow:0 0 0 7px rgba(46,204,113,0);}
+            100%{box-shadow:0 0 0 0 rgba(46,204,113,0);}
+        }
+
+        .panel{
+            position:relative;
+            padding:48px 44px;
+            background:var(--panel-2);
+            display:flex;
+            flex-direction:column;
+            justify-content:center;
+        }
+
+        .mobile-logo{display:none;}
+
+        .kicker{
+            font-size:.7rem;
+            font-weight:700;
+            text-transform:uppercase;
+            letter-spacing:3px;
+            color:var(--orange);
+            font-family:ui-monospace,"Cascadia Code",Consolas,monospace;
+        }
+        .title{
+            margin-top:10px;
+            font-size:1.55rem;
+            font-weight:700;
+            letter-spacing:-.3px;
+        }
         .sub{
-            color:#6f7787;
-            margin-bottom:30px;
+            margin-top:6px;
+            margin-bottom:26px;
+            color:var(--muted);
             font-size:.9rem;
         }
 
-        .form-group{
-            margin-bottom:18px;
+        .error-msg{
+            display:none;
+            align-items:flex-start;
+            gap:10px;
+            margin-bottom:20px;
+            padding:12px 14px;
+            background:rgba(239,68,68,.10);
+            border:1px solid rgba(239,68,68,.32);
+            border-radius:12px;
+            color:var(--danger);
+            font-size:.86rem;
+            font-weight:600;
+            line-height:1.35;
+            animation:shake .4s ease;
         }
+        .error-msg.show{display:flex;}
+        .error-msg svg{width:18px;height:18px;flex:0 0 18px;margin-top:1px;stroke:var(--danger);}
+        @keyframes shake{
+            10%,90%{transform:translateX(-1px);}
+            30%,70%{transform:translateX(3px);}
+            50%{transform:translateX(-3px);}
+        }
+
+        .form-group{margin-bottom:18px;}
 
         label{
             display:block;
-            color:#b8c0d0;
+            color:var(--label);
             margin-bottom:8px;
-            font-size:.9rem;
+            font-size:.82rem;
+            font-weight:600;
         }
 
+        .field{
+            position:relative;
+            display:flex;
+            align-items:center;
+        }
+        .field > svg{
+            position:absolute;
+            left:15px;
+            width:18px;
+            height:18px;
+            stroke:var(--muted);
+            pointer-events:none;
+            transition:stroke .15s;
+        }
         input{
             width:100%;
-            background:#1a1f2b;
-            border:1px solid rgba(255,255,255,.06);
-            height:50px;
-            border-radius:12px;
-            padding:0 14px;
-            color:white;
+            background:var(--field);
+            border:1px solid var(--line);
+            height:52px;
+            border-radius:13px;
+            padding:0 16px 0 46px;
+            color:var(--text);
+            font-size:.95rem;
             outline:none;
+            transition:border-color .15s, box-shadow .15s, background .15s;
         }
-
+        input::placeholder{color:#5d6678;}
         input:focus{
-            border-color:#ff6b00;
+            border-color:var(--orange);
+            background:#1a2030;
+            box-shadow:0 0 0 4px rgba(255,107,0,.12);
+        }
+        .field:focus-within > svg{stroke:var(--orange);}
+
+        input:-webkit-autofill,
+        input:-webkit-autofill:hover,
+        input:-webkit-autofill:focus{
+            -webkit-text-fill-color:var(--text);
+            -webkit-box-shadow:0 0 0 1000px var(--field) inset;
+            caret-color:var(--text);
+            transition:background-color 99999s ease-in-out 0s;
         }
 
         button{
             width:100%;
-            height:52px;
+            height:54px;
+            margin-top:8px;
             border:none;
-            border-radius:12px;
-            background:#ff6b00;
-            color:black;
+            border-radius:13px;
+            background:linear-gradient(145deg, var(--orange-soft), var(--orange));
+            color:#0a0d15;
+            font-size:.96rem;
             font-weight:700;
             cursor:pointer;
-            margin-top:10px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            gap:9px;
+            box-shadow:0 10px 26px rgba(255,107,0,.28);
+            transition:transform .12s, box-shadow .15s, opacity .15s;
         }
-
         button:hover{
-            opacity:.9;
+            transform:translateY(-1px);
+            box-shadow:0 14px 32px rgba(255,107,0,.38);
+        }
+        button:active{transform:translateY(0);}
+        button:disabled{
+            opacity:.7;
+            cursor:not-allowed;
+            transform:none;
+        }
+        button svg{width:18px;height:18px;stroke:#0a0d15;}
+
+        .secure{
+            margin-top:24px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            gap:8px;
+            color:var(--muted);
+            font-size:.76rem;
+        }
+        .secure svg{width:14px;height:14px;stroke:#2ecc71;}
+
+        @media (max-width:840px){
+            .shell{
+                grid-template-columns:1fr;
+                max-width:440px;
+            }
+            .brand{display:none;}
+            .panel{padding:40px 30px;}
+            .mobile-logo{
+                display:flex;
+                align-items:center;
+                gap:13px;
+                margin-bottom:28px;
+            }
         }
 
     </style>
@@ -157,93 +432,104 @@
 
 <body>
 
-    <div class="glow"></div>
+    <div class="ambient"></div>
 
-    <div class="login-box">
+    <div class="shell">
 
-        <div class="logo">
+        <!-- Painel de marca (desktop) -->
+        <aside class="brand">
 
-            <div class="logo-icon">
-                JB
+            <div class="brand-top">
+                <div class="logo-icon">JB</div>
+                <div class="logo-text">
+                    <b>JB Proteção Patrimonial</b>
+                    <span>Dashboard Executivo</span>
+                </div>
+            </div>
+            <div class="brand-head">
+                <h1>Inteligência Operacional <em>Em Tempo Real</em>.</h1>
+                <p>Financeiro, Vendas e Eventos em um só painel, sincronizado automaticamente com o Siprov.</p>
             </div>
 
-            <div class="logo-text">
-
-                JB Proteção
-
-                <span>Dashboard Executivo</span>
-
+            <div class="features">
+                <div class="feature">
+                    <span class="ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+                    </span>
+                    Sincronização automática Siprov
+                </div>
+                <div class="feature">
+                    <span class="ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 5-6"/></svg>
+                    </span>
+                    Indicadores e gráficos atualizados
+                </div>
+                <div class="feature">
+                    <span class="ic">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    </span>
+                    Acesso restrito e dados protegidos
+                </div>
             </div>
 
-        </div>
-
-        <div class="title">
-            Entrar
-        </div>
-
-        <div class="sub">
-            Faça login para acessar o painel
-        </div>
-
-        <div
-            id="error-msg"
-            class="hidden"
-            style="margin-bottom:18px; padding:12px 16px; background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); border-radius:12px; color:#f87171; font-size:.88rem; font-weight:600;"
-        >
-            Usuário ou senha inválidos. Tente novamente.
-        </div>
-
-        <form action="/login" method="POST">
-
-            <div class="form-group">
-
-                <label>Usuário</label>
-
-                <input
-                    type="text"
-                    name="usuario"
-                    placeholder="Digite o usuário"
-                    required
-                >
-
+            <div class="brand-foot">
+                <div class="status"><span class="dot"></span> Sistema online</div>
+                <div>v2.0.0</div>
             </div>
 
-            <div class="form-group">
+        </aside>
 
-                <label>Senha</label>
-
-                <input
-                    type="password"
-                    name="senha"
-                    placeholder="Digite a senha"
-                    required
-                >
-
+        <!-- Formulário -->
+        <main class="panel">
+            <div class="mobile-logo">
+                <div class="logo-icon">JB</div>
+                <div class="logo-text">
+                    <b>JB Proteção</b>
+                    <span>Dashboard Executivo</span>
+                </div>
             </div>
-
-            <button type="submit">
-                Entrar no Painel
-            </button>
-
-        </form>
-
+            <div class="kicker">Painel Executivo</div>
+            <div class="title">Acessar plataforma</div>
+            <div class="sub">Use Suas Credenciais Para Entrar.</div>
+            <div id="error-msg" class="error-msg">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span>Usuário ou senha inválidos. Tente novamente.</span>
+            </div>
+            <form action="/login" method="POST">
+                <div class="form-group">
+                    <label for="usuario">Usuário</label>
+                    <div class="field">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        <input id="usuario" type="text" name="usuario" placeholder="Digite o usuário" autocomplete="username" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="senha">Senha</label>
+                    <div class="field">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        <input id="senha" type="password" name="senha" placeholder="Digite a senha" autocomplete="current-password" required>
+                    </div>
+                </div>
+                <button type="submit">
+                    Login
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </button>
+            </form>
+            <div class="secure">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Conexão segura · Acesso a usuários autorizados
+            </div>
+        </main>
     </div>
-
-
-<script>
-    // Mostra erro se o login falhou
-    if (new URLSearchParams(window.location.search).get('erro')) {
-        document.getElementById('error-msg').classList.remove('hidden');
-    }
-
-    // Feedback visual no botão ao submeter
-    document.querySelector('form').addEventListener('submit', function () {
-        const btn = document.querySelector('button[type="submit"]');
-        btn.textContent = 'Entrando...';
-        btn.disabled = true;
-    });
-</script>
-
+    <script>
+        if (new URLSearchParams(window.location.search).get('erro')) {
+            document.getElementById('error-msg').classList.add('show');
+        }
+        document.querySelector('form').addEventListener('submit', function () {
+            const btn = document.querySelector('button[type="submit"]');
+            btn.innerHTML = 'Entrando...';
+            btn.disabled = true;
+        });
+    </script>
 </body>
-
 </html>

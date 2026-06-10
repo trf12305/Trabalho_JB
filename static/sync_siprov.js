@@ -105,14 +105,26 @@
         label.textContent = 'Disparando…';
         try {
             const r = await fetch('/api/admin/sync', { method: 'POST' });
+            let data = {};
+            try { data = await r.json(); } catch (_) { /* corpo vazio/não-JSON */ }
             if (!r.ok) {
-                statusText.textContent = 'Erro ao iniciar sync.';
+                let msg;
+                if (r.status === 503) {
+                    msg = data.status || 'Sincronização desativada neste ambiente.';
+                } else if (r.status === 401 || r.status === 403) {
+                    msg = 'Sessão expirada — faça login novamente.';
+                } else {
+                    msg = data.erro || data.status || ('Erro ao iniciar sync (HTTP ' + r.status + ').');
+                }
+                statusText.innerHTML = '<span class="text-red-400 font-semibold">✗ ' + msg + '</span>';
+                label.textContent = 'Sync Siprov';
                 btn.disabled = false;
                 return;
             }
             iniciarPolling();
         } catch (e) {
-            statusText.textContent = 'Erro de conexão ao iniciar sync.';
+            statusText.innerHTML = '<span class="text-red-400 font-semibold">✗ Erro de conexão ao iniciar sync.</span>';
+            label.textContent = 'Sync Siprov';
             btn.disabled = false;
         }
     });
