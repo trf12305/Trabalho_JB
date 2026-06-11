@@ -78,11 +78,15 @@
 
         .kpi-value {
 
-            font-size: 1.7rem;
+            /* Responsivo: encolhe em telas estreitas (tablet) pra não cortar
+               os números grandes; mantém ~1.7rem no desktop largo. */
+            font-size: clamp(0.95rem, 1.35vw, 1.7rem);
 
             font-weight: 900;
 
             letter-spacing: -1px;
+
+            white-space: nowrap;
         }
 
         .chart-container {
@@ -318,7 +322,7 @@
 
 <!-- KPI -->
 
-<section class="grid grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+<section class="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-4 mb-5">
 
     <div class="glass kpi-card">
         <p id="titulo-registros" class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
