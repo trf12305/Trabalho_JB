@@ -226,29 +226,78 @@ _cache = {
     'dados_vendas':      None,
 }
 
-# Cache do RESULTADO já calculado (dashboard pronto), por assinatura de
-# filtros + ultima_sync. Evita reprocessar os 119k registros a cada abertura
-# na CPU fraca da Render: a 1ª carga calcula, as seguintes (refresh, voltar
-# pro padrão) saem instantâneas. Invalidado naturalmente quando ultima_sync
-# muda (a chave inclui ela) e limitado em tamanho.
-_resultado_cache = {}
+# Cache do RESULTADO já calculado (dashboard pronto), por assinatura de filtros.
+# Estratégia "stale-while-revalidate": serve SEMPRE o último resultado na hora
+# (instantâneo). Quando os dados mudam (sync/fechamento), em vez de apagar o
+# cache (o que causaria uma carga "fria" de ~35-77s na CPU fraca da Render e
+# travaria a tela), apenas marca tudo como desatualizado: a próxima leitura
+# devolve o valor antigo IMEDIATAMENTE e dispara o recálculo EM SEGUNDO PLANO,
+# trocando o conteúdo quando fica pronto. Assim a tela nunca trava.
+_resultado_cache = {}          # chave -> {'v': versao, 'data': dashboard}
 _RESULTADO_CACHE_MAX = 60
+_cache_version = 0             # incrementa quando os dados mudam
+_revalidando = set()          # chaves com recálculo em andamento (anti-stampede)
+_reval_lock = threading.Lock()
+
+# Serializa o cálculo PESADO (119k registros). Evita 2 cálculos simultâneos
+# (request + revalidação/warmup) dobrando memória/CPU.
+_compute_lock = threading.Lock()
 
 
-def _resultado_get(chave):
-    return _resultado_cache.get(chave)
+def _invalidar_resultado_cache():
+    """Marca todo o cache de resultado como desatualizado (NÃO apaga). As
+    próximas leituras servem o valor antigo na hora e recalculam em background."""
+    global _cache_version
+    _cache_version += 1
 
 
-def _resultado_set(chave, valor):
+def _resultado_set(chave, versao, data):
     if len(_resultado_cache) >= _RESULTADO_CACHE_MAX:
         _resultado_cache.clear()
-    _resultado_cache[chave] = valor
+    _resultado_cache[chave] = {'v': versao, 'data': data}
 
 
-# Serializa o cálculo PESADO (119k registros). Evita que 2 requisições
-# simultâneas (ou request + pré-aquecimento) processem ao mesmo tempo,
-# dobrando memória/CPU. A 2ª espera e pega o resultado do cache.
-_compute_lock = threading.Lock()
+def _calcular_sincrono(chave, calc_fn):
+    """Calcula (pesado) sob o lock, com dupla verificação. Usado tanto na 1ª
+    carga (sem cache) quanto na revalidação em background."""
+    with _compute_lock:
+        entry = _resultado_cache.get(chave)
+        if entry is not None and entry['v'] == _cache_version:
+            return entry['data']           # outra thread já calculou
+        ver = _cache_version
+        data = calc_fn()
+        _resultado_set(chave, ver, data)
+        return data
+
+
+def _revalidar_async(chave, calc_fn):
+    """Dispara o recálculo em segundo plano (1 por chave por vez)."""
+    with _reval_lock:
+        if chave in _revalidando:
+            return
+        _revalidando.add(chave)
+
+    def run():
+        try:
+            _calcular_sincrono(chave, calc_fn)
+        except Exception:
+            logger.exception('[CACHE] Falha ao revalidar em background')
+        finally:
+            with _reval_lock:
+                _revalidando.discard(chave)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _servir_com_revalidacao(chave, calc_fn):
+    """Stale-while-revalidate. Serve o cache na hora; se desatualizado, dispara
+    recálculo em background. Só calcula de forma síncrona (bloqueante) se NÃO
+    houver nada em cache (1ª vez do filtro ou logo após reiniciar)."""
+    entry = _resultado_cache.get(chave)
+    if entry is not None:
+        if entry['v'] != _cache_version:
+            _revalidar_async(chave, calc_fn)
+        return entry['data']
+    return _calcular_sincrono(chave, calc_fn)
 
 
 def _cache_invalido(arquivo):
@@ -885,30 +934,22 @@ def gerar_dashboard_analitico(dados, dados_completos, tipo_filtro='vencimento'):
 # =========================================================
 
 def _computar_financeiro(tipo, data_inicial, data_final, bases):
-    """Calcula (ou recupera do cache de resultado) o dashboard financeiro.
-    Usado pelo endpoint e pelo pré-aquecimento. Cache key inclui ultima_sync,
-    então invalida sozinho quando os dados mudam."""
-    anos = _anos_do_filtro(data_inicial, data_final)
-    chave = (f"fin|{bancodados.meta_get('ultima_sync')}|{anos}|{tipo}|"
-             f"{data_inicial}|{data_final}|{sorted(bases or [])}")
-    cached = _resultado_get(chave)
-    if cached is not None:
-        logger.info(f'[API/FIN] cache HIT ({tipo}, {data_inicial}->{data_final})')
-        return cached
+    """Dashboard financeiro com cache stale-while-revalidate. A chave é só dos
+    filtros (sem ultima_sync): quando os dados mudam, _invalidar_resultado_cache
+    marca tudo desatualizado e a revalidação acontece em background."""
+    chave = f"fin|{tipo}|{data_inicial}|{data_final}|{sorted(bases or [])}"
 
-    with _compute_lock:
-        cached = _resultado_get(chave)          # re-checa: outra thread pode ter calculado
-        if cached is not None:
-            return cached
-        logger.info(f'[API/FIN] cache MISS — calculando | tipo={tipo} | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
+    def calc():
+        anos = _anos_do_filtro(data_inicial, data_final)
+        logger.info(f'[API/FIN] calculando | tipo={tipo} | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
         # Carga em STREAMING (sem materializar os brutos) — evita OOM/502.
         dados_processados = carregar_processados(anos)
         dados_filtrados   = filtrar_dados(
             dados_processados, tipo, data_inicial, data_final, bases
         )
-        dashboard = gerar_dashboard_analitico(dados_filtrados, dados_processados, tipo)
-        _resultado_set(chave, dashboard)
-        return dashboard
+        return gerar_dashboard_analitico(dados_filtrados, dados_processados, tipo)
+
+    return _servir_com_revalidacao(chave, calc)
 
 
 @app.route('/api/financeiro')
@@ -1603,24 +1644,17 @@ def gerar_dashboard_eventos(dados_todos, data_inicial=None, data_final=None, bas
 # =========================================================
 
 def _computar_eventos(data_inicial, data_final, bases):
-    """Calcula (ou recupera do cache de resultado) o dashboard de eventos."""
-    anos = _anos_do_filtro(data_inicial, data_final)
-    chave = (f"evt|{bancodados.meta_get('ultima_sync')}|{anos}|"
-             f"{data_inicial}|{data_final}|{sorted(bases or [])}")
-    cached = _resultado_get(chave)
-    if cached is not None:
-        logger.info(f'[API/EVENTOS] cache HIT ({data_inicial}->{data_final})')
-        return cached
+    """Dashboard de eventos com cache stale-while-revalidate (igual ao
+    financeiro)."""
+    chave = f"evt|{data_inicial}|{data_final}|{sorted(bases or [])}"
 
-    with _compute_lock:
-        cached = _resultado_get(chave)
-        if cached is not None:
-            return cached
-        logger.info(f'[API/EVENTOS] cache MISS — calculando | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
+    def calc():
+        anos = _anos_do_filtro(data_inicial, data_final)
+        logger.info(f'[API/EVENTOS] calculando | {data_inicial} -> {data_final} | anos={anos} | bases={bases}')
         dados_eventos = carregar_eventos(anos)
-        dashboard = gerar_dashboard_eventos(dados_eventos, data_inicial, data_final, bases)
-        _resultado_set(chave, dashboard)
-        return dashboard
+        return gerar_dashboard_eventos(dados_eventos, data_inicial, data_final, bases)
+
+    return _servir_com_revalidacao(chave, calc)
 
 
 @app.route('/api/eventos')
@@ -1798,9 +1832,9 @@ def _executar_sync(max_retries=10, retry_delay=120, forcar=False):
                 _cache['dados_processados'] = None
                 _cache['dados_eventos']     = None
                 _cache['dados_vendas']      = None
-                _resultado_cache.clear()
+                _invalidar_resultado_cache()   # marca stale (não apaga → sem carga fria)
                 logger.info('[SIPROV] Cache invalidado apos sync.')
-                _warmup_async()  # re-aquece as visões padrão com os dados novos
+                _warmup_async()  # recalcula as visões padrão com os dados novos
                 return  # sucesso
             except Exception as e:
                 # Erro de rede no meio da sync → retry; outros erros → aborta
@@ -1897,7 +1931,7 @@ def _fechamento_mensal(ano=None, mes=None):
     _cache['dados_eventos'] = None
     _cache['dados_vendas'] = None
     _cache_adesoes['chave'] = None
-    _resultado_cache.clear()
+    _invalidar_resultado_cache()
     logger.info(f'[FECHAMENTO] Concluído para {mes:02d}/{ano}.')
 
 
@@ -2252,7 +2286,7 @@ def api_admin_db_congelar():
     n = bancodados.congelar_ano(ano)
     # Invalida cache para refletir mudança
     _cache['arquivo'] = None
-    _resultado_cache.clear()
+    _invalidar_resultado_cache()
     return jsonify({'status': 'ok', 'ano': ano, 'titulos_congelados': n})
 # =========================================================
 # START
