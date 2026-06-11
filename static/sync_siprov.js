@@ -22,10 +22,16 @@
     function fmtData(iso) {
         if (!iso) return '—';
         try {
-            const d = new Date(iso);
+            // O servidor (Render) grava o horário em UTC, sem informar o fuso.
+            // Acrescenta 'Z' para o navegador interpretar como UTC e exibe no
+            // fuso de Brasília — senão apareceria 3h adiantado (10:34 vs 07:34).
+            let s = String(iso);
+            if (!/([zZ]|[+\-]\d\d:?\d\d)$/.test(s)) s = s + 'Z';
+            const d = new Date(s);
             return d.toLocaleString('pt-BR', {
                 day: '2-digit', month: '2-digit', year: 'numeric',
                 hour: '2-digit', minute: '2-digit',
+                timeZone: 'America/Sao_Paulo',
             });
         } catch { return iso; }
     }
