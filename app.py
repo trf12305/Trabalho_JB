@@ -49,6 +49,22 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 ADMIN_USER = os.environ.get('ADMIN_USER', 'marcone')
 ADMIN_PASS = os.environ.get('ADMIN_PASS', '3209')
 
+
+def _carregar_usuarios():
+    """Usuários válidos = ADMIN (do .env) + extras de USUARIOS_EXTRAS.
+    Formato de USUARIOS_EXTRAS: 'usuario1:senha1,usuario2:senha2'.
+    Mantém as senhas FORA do código/git — ficam no .env (local) e no
+    Environment da Render (produção)."""
+    usuarios = {ADMIN_USER: ADMIN_PASS}
+    for par in os.environ.get('USUARIOS_EXTRAS', '').split(','):
+        u, sep, s = par.strip().partition(':')
+        if sep and u.strip():
+            usuarios[u.strip()] = s.strip()
+    return usuarios
+
+
+USUARIOS = _carregar_usuarios()
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 limiter = Limiter(
@@ -1731,7 +1747,7 @@ def home():
 def login():
     usuario = (request.form.get('usuario') or '').strip()
     senha   = (request.form.get('senha')   or '').strip()
-    if usuario == ADMIN_USER and senha == ADMIN_PASS:
+    if usuario in USUARIOS and USUARIOS[usuario] == senha:
         session.permanent = True
         session['logado'] = True
         logger.info(f'[LOGIN] Acesso concedido: usuario={usuario!r}')
